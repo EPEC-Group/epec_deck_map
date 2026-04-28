@@ -6,7 +6,7 @@ from dash.development.base_component import Component, _explicitize_args
 
 
 class EpecDeckMap(Component):
-    """EpecDeckMap — custom deck.gl wrapper for MM Client Portal.
+    """EpecDeckMap — custom deck.gl wrapper.
 
     Renders PathLayer / ScatterplotLayer / TextLayer directly from Python
     layer-spec dicts.  No @deck.gl/json middleman; no @@= corruption.
