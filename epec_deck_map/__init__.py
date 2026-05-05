@@ -8,4 +8,4 @@ _js_dist = EpecDeckMap._js_dist
 _css_dist = EpecDeckMap._css_dist
 
 __all__ = ['EpecDeckMap']
-__version__ = '0.1.2'
+__version__ = '0.1.3'

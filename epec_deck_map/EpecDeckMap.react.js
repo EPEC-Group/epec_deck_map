@@ -84,22 +84,20 @@ function EpecDeckMap({
     // Browser-zoom (Ctrl +/-) realignment.
     //
     // On browser zoom, devicePixelRatio changes. The maplibre basemap re-anchors
-    // its projection to the new DPR; deck.gl's projection matrix stays anchored
-    // to the DPR at mount time, producing a SE-shifted layer offset (same size,
-    // wrong origin). Calling deck._onResize() does not fix this — the buffer
-    // dimensions already match what it would recompute.
-    //
-    // The reliable fix is to remount <DeckGL> when DPR changes, by keying it
-    // on the current DPR. Trade-off: any user pan/zoom state is reset to
-    // initialViewState on Ctrl +/-. Acceptable for current scope.
+    // to the new DPR; deck.gl's internal state (initialized at mount) does not,
+    // producing a SE-shifted layer offset (same size, wrong origin). Calling
+    // deck._onResize() on the window resize event re-runs enough of deck.gl's
+    // init path (canvas attach, viewport, projection) to realign without
+    // unmounting — preserving user pan/zoom state.
     // ---------------------------------------------------------------------------
     const deckRef = useRef(null);
-    const [dprKey, setDprKey] = React.useState(window.devicePixelRatio);
 
     useEffect(() => {
         const handleResize = () => {
-            const dpr = window.devicePixelRatio;
-            setDprKey(prev => (prev !== dpr ? dpr : prev));
+            const deck = deckRef.current && deckRef.current.deck;
+            if (deck && typeof deck._onResize === 'function') {
+                deck._onResize();
+            }
         };
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
@@ -148,7 +146,6 @@ function EpecDeckMap({
             style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
         >
             <DeckGL
-                key={dprKey} // see DPR realignment workaround above
                 ref={deckRef}
                 initialViewState={initialViewState}
                 controller={true}

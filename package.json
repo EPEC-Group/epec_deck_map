@@ -1,6 +1,6 @@
 {
   "name": "epec-deck-map",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Custom deck.gl Dash component — direct layer construction, no @deck.gl/json",
   "engines": { "node": ">=18.0.0" },
   "scripts": {
