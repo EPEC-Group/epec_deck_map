@@ -5,7 +5,7 @@ A custom [Dash](https://dash.plotly.com/) component that wraps [deck.gl](https:/
 ## Install
 
 ```bash
-pip install git+https://github.com/EPEC-Group/epec_deck_map.git@v0.1.0
+pip install git+https://github.com/EPEC-Group/epec_deck_map.git@v0.1.1
 ```
 
 ## Usage
