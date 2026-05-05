@@ -83,40 +83,26 @@ function EpecDeckMap({
     // ---------------------------------------------------------------------------
     // Browser-zoom (Ctrl +/-) realignment.
     //
-    // deck.gl caches its canvas size on mount and does not react to changes in
-    // window.devicePixelRatio. The maplibre basemap *does* react, so when the
-    // user zooms the browser (Ctrl +/-) the two diverge: basemap tiles realign
-    // to the new DPR while deck.gl layers stay pinned to the original DPR,
-    // producing the visible misalignment that only a hard refresh clears.
+    // On browser zoom, devicePixelRatio changes. The maplibre basemap re-anchors
+    // its projection to the new DPR; deck.gl's projection matrix stays anchored
+    // to the DPR at mount time, producing a SE-shifted layer offset (same size,
+    // wrong origin). Calling deck._onResize() does not fix this — the buffer
+    // dimensions already match what it would recompute.
     //
-    // We listen for DPR changes via matchMedia('(resolution: <current>dppx)')
-    // and call deck._onResize() to force a canvas + viewport recompute.
-    // matchMedia only fires once per threshold crossing, so we re-arm the
-    // listener against the new DPR after each change.
+    // The reliable fix is to remount <DeckGL> when DPR changes, by keying it
+    // on the current DPR. Trade-off: any user pan/zoom state is reset to
+    // initialViewState on Ctrl +/-. Acceptable for current scope.
     // ---------------------------------------------------------------------------
     const deckRef = useRef(null);
+    const [dprKey, setDprKey] = React.useState(window.devicePixelRatio);
 
     useEffect(() => {
-        const handleDprChange = () => {
-            const deck = deckRef.current && deckRef.current.deck;
-            if (deck && typeof deck._onResize === 'function') {
-                deck._onResize();
-            }
+        const handleResize = () => {
+            const dpr = window.devicePixelRatio;
+            setDprKey(prev => (prev !== dpr ? dpr : prev));
         };
-        let mql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
-        mql.addEventListener('change', handleDprChange);
-        // matchMedia only fires once per threshold; re-arm after each change.
-        const rearm = () => {
-            mql.removeEventListener('change', handleDprChange);
-            mql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
-            mql.addEventListener('change', handleDprChange);
-            mql.addEventListener('change', rearm);
-        };
-        mql.addEventListener('change', rearm);
-        return () => {
-            mql.removeEventListener('change', handleDprChange);
-            mql.removeEventListener('change', rearm);
-        };
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
     }, []);
 
     // Click handler: emit clickInfo via setProps.
@@ -162,8 +148,8 @@ function EpecDeckMap({
             style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
         >
             <DeckGL
+                key={dprKey} // see DPR realignment workaround above
                 ref={deckRef}
-                useDevicePixelRatio={true}
                 initialViewState={initialViewState}
                 controller={true}
                 layers={deckLayers}
