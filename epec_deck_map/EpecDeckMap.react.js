@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import PropTypes from 'prop-types';
 import DeckGL from '@deck.gl/react';
 import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
@@ -80,6 +80,45 @@ function EpecDeckMap({
         [layers],
     );
 
+    // ---------------------------------------------------------------------------
+    // Browser-zoom (Ctrl +/-) realignment.
+    //
+    // deck.gl caches its canvas size on mount and does not react to changes in
+    // window.devicePixelRatio. The maplibre basemap *does* react, so when the
+    // user zooms the browser (Ctrl +/-) the two diverge: basemap tiles realign
+    // to the new DPR while deck.gl layers stay pinned to the original DPR,
+    // producing the visible misalignment that only a hard refresh clears.
+    //
+    // We listen for DPR changes via matchMedia('(resolution: <current>dppx)')
+    // and call deck._onResize() to force a canvas + viewport recompute.
+    // matchMedia only fires once per threshold crossing, so we re-arm the
+    // listener against the new DPR after each change.
+    // ---------------------------------------------------------------------------
+    const deckRef = useRef(null);
+
+    useEffect(() => {
+        const handleDprChange = () => {
+            const deck = deckRef.current && deckRef.current.deck;
+            if (deck && typeof deck._onResize === 'function') {
+                deck._onResize();
+            }
+        };
+        let mql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+        mql.addEventListener('change', handleDprChange);
+        // matchMedia only fires once per threshold; re-arm after each change.
+        const rearm = () => {
+            mql.removeEventListener('change', handleDprChange);
+            mql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+            mql.addEventListener('change', handleDprChange);
+            mql.addEventListener('change', rearm);
+        };
+        mql.addEventListener('change', rearm);
+        return () => {
+            mql.removeEventListener('change', handleDprChange);
+            mql.removeEventListener('change', rearm);
+        };
+    }, []);
+
     // Click handler: emit clickInfo via setProps.
     // Workaround #2 retired: pickingRadius on the DeckGL instance (not an invisible fat layer)
     //   handles the picking catchment radius.
@@ -123,6 +162,8 @@ function EpecDeckMap({
             style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
         >
             <DeckGL
+                ref={deckRef}
+                useDevicePixelRatio={true}
                 initialViewState={initialViewState}
                 controller={true}
                 layers={deckLayers}
