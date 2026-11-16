@@ -322,7 +322,7 @@ function EpecDeckMap({
             rafId = requestAnimationFrame(tick);
             if (ts - lastFrameTs < FRAME_INTERVAL_MS) return;  // throttle
             lastFrameTs = ts;
-            const rate = speedZoom == null ? 1 : 2 ** (speedZoomStrength * (speedZoom - zoomRef.current));
+            const rate = speedZoom == null ? 1 : 2 ** (-speedZoomStrength * Math.max(0, zoomRef.current - speedZoom));
             if (prevTs != null) {
                 time = (time + (ts - prevTs) * rate * loopLength / CYCLE_DURATION_MS) % loopLength;
             }
