@@ -56,18 +56,44 @@ if __name__ == "__main__":
     app.run(debug=True)
 ```
 
+### Binary layer data
+
+For large layers, `binary_data` packs columns into base64 typed arrays that the component decodes straight into deck.gl's binary attributes, skipping per-row JSON. Name each column by its deck.gl accessor; no `_accessors` entry is needed for it. `_objects` (optional) supplies the row dicts used for tooltips and `clickInfo`, indexed like the objects.
+
+```python
+from epec_deck_map import binary_data
+
+lines = {
+    "_type": "PathLayer",
+    "id": "lines",
+    "data": binary_data({
+        "getPath": [line.coords for line in lines_in],      # [[lon, lat], ...] per line
+        "getColor": [line.rgba for line in lines_in],       # [r, g, b, a] per line
+        "getWidth": [line.width for line in lines_in],
+    }),
+    "_objects": [{"name": line.name, "tooltip": line.html} for line in lines_in],
+    "pickable": True,
+    "widthUnits": "pixels",
+}
+```
+
+- Values are numbers or fixed-length lists (plain Python; call `.tolist()` on numpy arrays).
+- `getPath` holds one position per vertex; other path columns hold one value per path, or one per vertex if named in `per_vertex=` (for example TripsLayer `getTimestamps`).
+- `*Color` columns default to normalised `uint8`, everything else to `float32` (about 1.5 m of longitude). Pass `dtypes={"getPath": "float64"}` for full precision.
+- Binary data that fails validation (unknown dtype, length mismatch, bad `startIndices`) skips the layer and logs a console error.
+
 ### Prop reference
 
 See the docstring in [epec_deck_map/EpecDeckMap.py](epec_deck_map/EpecDeckMap.py) for full semantics. Key props:
 
 | Prop | Type | Description |
 |---|---|---|
-| `layers` | list | Layer-spec dicts. Each must have `_type` (deck.gl class name) and `_accessors` (camelCase prop → snake_case data key). |
+| `layers` | list | Layer-spec dicts. Each must have `_type` (deck.gl class name) and `_accessors` (camelCase prop → snake_case data key). `data` may be binary (see above). |
 | `viewState` | dict | Initial camera `{latitude, longitude, zoom, pitch}`. Managed internally after mount. |
 | `mapStyle` | str | Basemap tile URL (Carto GL JSON style or Mapbox URL). |
 | `pickingRadius` | int | Hit-test radius in pixels (default 5). |
 | `tooltip` | dict | `{"style": {...}}` applied to the tooltip container. Each data row supplies its own HTML in its `tooltip` field. |
-| `clickInfo` | dict | Output-only. Set on click: `{"object": <row>, "coordinate": [lon, lat], "layerId": str}`. |
+| `clickInfo` | dict | Output-only. Set on click: `{"object": <row>, "index": int, "coordinate": [lon, lat], "layerId": str}`. On a binary layer `object` is `_objects[index]`, or `None` without `_objects`. |
 
 ## Rebuilding the bundle
 

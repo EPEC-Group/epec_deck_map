@@ -1,4 +1,5 @@
 from .EpecDeckMap import EpecDeckMap
+from .binary import binary_data, encode_array
 
 # Expose _js_dist at the module level so ComponentRegistry.get_resources('_js_dist')
 # finds it when it does getattr(module, '_js_dist', []).  Without this, Dash never
@@ -7,5 +8,5 @@ from .EpecDeckMap import EpecDeckMap
 _js_dist = EpecDeckMap._js_dist
 _css_dist = EpecDeckMap._css_dist
 
-__all__ = ['EpecDeckMap']
+__all__ = ['EpecDeckMap', 'binary_data', 'encode_array']
 __version__ = '0.1.0'
