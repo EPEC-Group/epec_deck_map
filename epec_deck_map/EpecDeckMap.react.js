@@ -3,7 +3,8 @@ import PropTypes from 'prop-types';
 import DeckGL from '@deck.gl/react';
 import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { TripsLayer } from '@deck.gl/geo-layers';
-import { Map } from 'react-map-gl/maplibre';
+import { MapboxOverlay } from '@deck.gl/mapbox';
+import { Map, useControl, useMap } from 'react-map-gl/maplibre';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -87,6 +88,63 @@ function buildLayer(spec, currentTime) {
     return new LayerClass(props);
 }
 
+const isPlainObject = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
+
+/** Add MapLibre sources and layers to the basemap, re-adding them after every style load. */
+function BasemapOverlays({ sources, layers }) {
+    const { current } = useMap();
+    useEffect(() => {
+        const map = current && current.getMap();
+        if (!map) return undefined;
+        const addedSources = new Set();
+        const addedLayers = new Set();
+        // A rejected spec is not retried on every styledata until the props change.
+        const failed = new Set();
+        const add = (key, exists, fn) => {
+            if (failed.has(key) || exists()) return false;
+            try {
+                fn();
+            } catch (err) {
+                console.warn(`EpecDeckMap: ${key}: ${err.message}`);
+            }
+            if (exists()) return true;
+            failed.add(key);
+            return false;
+        };
+        const apply = () => {
+            // Mirrors react-map-gl's <Source>/<Layer>: style.loaded() also waits on tiles.
+            if (!map.style || !map.style._loaded) return;
+            for (const [sid, spec] of Object.entries(sources)) {
+                if (add(`source ${sid}`, () => map.getSource(sid), () => map.addSource(sid, spec))) {
+                    addedSources.add(sid);
+                }
+            }
+            for (const { beforeId, ...layer } of layers) {
+                const before = beforeId && map.getLayer(beforeId) ? beforeId : undefined;
+                if (add(`layer ${layer.id}`, () => map.getLayer(layer.id), () => map.addLayer(layer, before))) {
+                    addedLayers.add(layer.id);
+                }
+            }
+        };
+        apply();
+        map.on('styledata', apply);
+        return () => {
+            map.off('styledata', apply);
+            if (!map.style) return;
+            for (const lid of addedLayers) if (map.getLayer(lid)) map.removeLayer(lid);
+            for (const sid of addedSources) if (map.getSource(sid)) map.removeSource(sid);
+        };
+    }, [current, sources, layers]);
+    return null;
+}
+
+/** deck.gl rendered inside MapLibre's GL context, so layers can sit beneath basemap labels. */
+function DeckOverlay(props) {
+    const overlay = useControl(() => new MapboxOverlay(props));
+    overlay.setProps(props);
+    return null;
+}
+
 // ---------------------------------------------------------------------------
 // EpecDeckMap component
 // ---------------------------------------------------------------------------
@@ -95,6 +153,9 @@ function EpecDeckMap({
     layers,
     viewState,
     mapStyle,
+    mapSources,
+    mapLayers,
+    interleaved,
     pickingRadius,
     tooltip,
     setProps,
@@ -232,22 +293,57 @@ function EpecDeckMap({
         pitch: 0,
     };
 
+    // Style JSON only: anything other than plain dicts / lists of dicts is dropped.
+    const overlaySources = useMemo(
+        () => (isPlainObject(mapSources)
+            ? Object.fromEntries(Object.entries(mapSources).filter(([, s]) => isPlainObject(s)))
+            : {}),
+        [mapSources],
+    );
+    const overlayLayers = useMemo(
+        () => (Array.isArray(mapLayers)
+            ? mapLayers.filter(l => isPlainObject(l) && typeof l.id === 'string')
+            : []),
+        [mapLayers],
+    );
+    const style = isPlainObject(mapStyle) || typeof mapStyle === 'string' ? mapStyle : undefined;
+    const overlays = <BasemapOverlays sources={overlaySources} layers={overlayLayers} />;
+    const radius = pickingRadius != null ? pickingRadius : 5;
+
     return (
         <div
             id={id}
             style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
         >
-            <DeckGL
-                initialViewState={initialViewState}
-                controller={true}
-                layers={deckLayers}
-                pickingRadius={pickingRadius != null ? pickingRadius : 5}
-                onClick={handleClick}
-                getTooltip={getTooltip}
-            >
-                {/* maplibre-gl basemap — no Mapbox token required for Carto tiles */}
-                <Map mapStyle={mapStyle} mapLib={maplibregl} />
-            </DeckGL>
+            {interleaved ? (
+                <Map
+                    initialViewState={initialViewState}
+                    mapStyle={style}
+                    mapLib={maplibregl}
+                    style={{ width: '100%', height: '100%' }}
+                >
+                    {overlays}
+                    <DeckOverlay
+                        interleaved
+                        layers={deckLayers}
+                        pickingRadius={radius}
+                        onClick={handleClick}
+                        getTooltip={getTooltip}
+                    />
+                </Map>
+            ) : (
+                <DeckGL
+                    initialViewState={initialViewState}
+                    controller={true}
+                    layers={deckLayers}
+                    pickingRadius={radius}
+                    onClick={handleClick}
+                    getTooltip={getTooltip}
+                >
+                    {/* maplibre-gl basemap — no Mapbox token required for Carto tiles */}
+                    <Map mapStyle={style} mapLib={maplibregl}>{overlays}</Map>
+                </DeckGL>
+            )}
         </div>
     );
 }
@@ -259,8 +355,17 @@ EpecDeckMap.propTypes = {
     layers: PropTypes.array,
     /** Initial camera position {latitude, longitude, zoom, pitch} */
     viewState: PropTypes.object,
-    /** Basemap tile URL (Carto, Mapbox, etc.) */
-    mapStyle: PropTypes.string,
+    /** MapLibre style: a style URL or a full style JSON object */
+    mapStyle: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
+    /** Extra MapLibre sources added to the basemap: {sourceId: source JSON} */
+    mapSources: PropTypes.object,
+    /** Extra MapLibre layer JSON dicts, drawn in order; optional `beforeId` names a basemap layer */
+    mapLayers: PropTypes.array,
+    /**
+     * Render deck.gl inside MapLibre's GL context so a layer spec's `beforeId`
+     * can place it beneath a basemap layer (e.g. labels). Toggling remounts the map.
+     */
+    interleaved: PropTypes.bool,
     /** Picking radius in pixels — replaces the fat invisible PathLayer workaround */
     pickingRadius: PropTypes.number,
     /**

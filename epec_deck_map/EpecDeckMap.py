@@ -22,8 +22,21 @@ class EpecDeckMap(Component):
     viewState : dict
         Initial camera ``{latitude, longitude, zoom, pitch}``.  Used once on
         mount; user pan/zoom is managed internally by deck.gl.
-    mapStyle : str
-        Basemap tile URL (Carto GL JSON style or Mapbox URL).
+    mapStyle : str | dict
+        MapLibre style: a style URL (e.g. Carto GL JSON) or a full style JSON
+        dict.
+    mapSources : dict
+        Extra MapLibre sources added on top of the style, ``{source_id:
+        source_json}`` (raster/WMS ``tiles``, vector, ``geojson``, ...).
+        Re-added after every style change.
+    mapLayers : list
+        Extra MapLibre layer JSON dicts, drawn in order above the style's
+        layers.  An optional ``beforeId`` names a basemap layer to insert
+        beneath; it is ignored when the style has no such layer.
+    interleaved : bool
+        Render deck.gl inside MapLibre's GL context (default False).  A deck
+        layer spec may then carry ``beforeId`` to draw beneath that basemap
+        layer, e.g. below the labels.  Toggling it remounts the map.
     pickingRadius : int
         Picking radius in pixels (default 5).  Replaces the fat invisible
         PathLayer workaround from dash-deck.
@@ -41,6 +54,9 @@ class EpecDeckMap(Component):
         'layers',
         'viewState',
         'mapStyle',
+        'mapSources',
+        'mapLayers',
+        'interleaved',
         'pickingRadius',
         'tooltip',
         'clickInfo',
@@ -67,6 +83,9 @@ class EpecDeckMap(Component):
         layers=Component.UNDEFINED,
         viewState=Component.UNDEFINED,
         mapStyle=Component.UNDEFINED,
+        mapSources=Component.UNDEFINED,
+        mapLayers=Component.UNDEFINED,
+        interleaved=Component.UNDEFINED,
         pickingRadius=Component.UNDEFINED,
         tooltip=Component.UNDEFINED,
         clickInfo=Component.UNDEFINED,
