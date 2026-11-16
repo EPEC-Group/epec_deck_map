@@ -102,7 +102,9 @@ function arrowTracks(spec, zoom, loopLength) {
         length *= scale;
         const span = Math.abs(ts[ts.length - 1] - ts[0]);
         if (length < 2 * size || !(span > 0)) continue;
-        const period = spec.pulseSpacing || loopLength;
+        const period = spec.pulseSpacing > 0
+            ? rowPulseSpacing(span, spec.trailLength != null ? spec.trailLength : DEFAULT_TRAIL_LENGTH, spec.pulseSpacing)
+            : loopLength;
         const n = Math.min(MAX_ARROWS_PER_ROW, Math.max(1, Math.floor(period * length / (span * spacing))));
         const color = arrowheads.color || (getColor ? row[getColor] : spec.getColor) || DEFAULT_TRIPS_COLOR;
         tracks.push({ xy, ts, step: period / n, color });
@@ -159,19 +161,32 @@ function arrowheadLayer({ id, size, tracks }, currentTime) {
  * sweeping 0..pulseSpacing the heads sit at currentTime + k * pulseSpacing:
  * evenly spaced pulses at one speed that hand over seamlessly at the wrap.
  */
+/**
+ * A row's pulse gap: pulseSpacing, or for a row shorter than it the largest whole
+ * fraction of pulseSpacing that fits, so a pulse head (and its arrow) is always on it.
+ * Half the trail floors the gap so a tiny row is not flooded with copies.
+ */
+function rowPulseSpacing(span, trail, pulseSpacing) {
+    const fit = Math.max(span, trail / 2);
+    return fit >= pulseSpacing ? pulseSpacing : pulseSpacing / Math.ceil(pulseSpacing / fit);
+}
+
 function expandPulses(spec) {
     const { pulseSpacing, _accessors = {}, data } = spec;
     const key = _accessors.getTimestamps;
     if (!(pulseSpacing > 0) || !key || !data) return spec;
     const trail = spec.trailLength != null ? spec.trailLength : DEFAULT_TRAIL_LENGTH;
+    const cycle = spec.loopLength != null ? Number(spec.loopLength) : pulseSpacing;
     const rows = [];
     for (const row of data) {
         const ts = row[key];
         if (!ts || ts.length === 0) continue;
         const lo = Math.min(ts[0], ts[ts.length - 1]);
         const hi = Math.max(ts[0], ts[ts.length - 1]);
-        for (let k = Math.floor(lo / pulseSpacing); k <= Math.ceil((hi + trail) / pulseSpacing); k++) {
-            rows.push(k === 0 ? row : { ...row, [key]: ts.map(t => t - k * pulseSpacing) });
+        const gap = rowPulseSpacing(hi - lo, trail, pulseSpacing);
+        // Copies must cover the whole clock cycle, which can be longer than a short row's gap.
+        for (let k = Math.floor((lo - cycle) / gap); k <= Math.ceil((hi + trail) / gap); k++) {
+            rows.push(k === 0 ? row : { ...row, [key]: ts.map(t => t - k * gap) });
         }
     }
     return { ...spec, data: rows };

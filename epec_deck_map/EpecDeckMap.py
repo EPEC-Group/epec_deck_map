@@ -26,7 +26,9 @@ class EpecDeckMap(Component):
         pixels apart on long lines. Not pickable.
         A TripsLayer spec may also set ``pulseSpacing`` (timestamp units, e.g.
         km): each row then carries a pulse every ``pulseSpacing`` along it, all
-        at one speed, and ``loopLength`` defaults to ``pulseSpacing`` (keep them
+        at one speed (a row shorter than ``pulseSpacing`` plus ``trailLength``
+        gets the largest whole fraction of it that fits, so it always shows a
+        pulse), and ``loopLength`` defaults to ``pulseSpacing`` (keep them
         equal so pulses hand over seamlessly at the cycle wrap).
         ``speedZoom`` (number) slows the clock when zoomed in past that zoom:
         it runs at 2 ** (-speedZoomStrength * max(0, zoom - speedZoom)) times
