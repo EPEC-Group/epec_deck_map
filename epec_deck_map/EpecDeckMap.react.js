@@ -80,9 +80,14 @@ function buildLayer(spec, currentTime) {
 
     // Convert each _accessors entry into a real accessor function.
     // e.g. { "getPath": "path" } → getPath: d => d["path"]
+    // deck.gl ignores a new accessor function, so key each one's update trigger
+    // on its column: re-pointing an accessor without new data still redraws.
+    const updateTriggers = { ...rest.updateTriggers };
     for (const [propName, dataKey] of Object.entries(_accessors)) {
         props[propName] = (d) => d[dataKey];
+        updateTriggers[propName] = dataKey;
     }
+    props.updateTriggers = updateTriggers;
 
     return new LayerClass(props);
 }
