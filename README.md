@@ -77,6 +77,8 @@ A `TripsLayer` spec may add `"arrowheads": {"size": 8, "spacing": 150, "color": 
 
 With timestamps in distance along the line (e.g. km), set `"pulseSpacing": 150` on a `TripsLayer` spec: every row carries a pulse every 150 km, all moving at one speed (150 km per 4 s cycle), and arrowheads ride every pulse. `loopLength` defaults to `pulseSpacing`; leave it unset or equal so pulses hand over seamlessly at the cycle wrap. `trailLength` is in the same units.
 
+Add `"speedZoom": 6` to keep pulses moving at the same screen speed at every zoom: the clock runs at `2 ** (speedZoom - zoom)` times its normal rate, so one cycle takes 4 s at zoom 6 and twice as long one level further in. The first trips spec that sets it drives the shared clock.
+
 ## Rebuilding the bundle
 
 Node 18 or later is required.

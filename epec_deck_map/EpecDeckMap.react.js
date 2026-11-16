@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import DeckGL from '@deck.gl/react';
 import { IconLayer, PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
@@ -76,8 +76,8 @@ function fromWorld(x, y) {
 /**
  * Per-row arrowhead geometry for a trips spec with an `arrowheads` key, or null.
  *
- * Each row gets a timestamp step that puts consecutive arrows about `spacing`
- * screen pixels apart at this zoom, snapped so the pulse period (pulseSpacing,
+ * Each row gets a timestamp step that puts consecutive arrows at least `spacing`
+ * screen pixels apart (closer only where pulses themselves are) at this zoom, snapped so the pulse period (pulseSpacing,
  * else loopLength) is a whole number of steps: every pulse head carries an
  * arrow and the arrows cycle seamlessly with the pulses. Rows shorter on
  * screen than two arrows get none.
@@ -103,7 +103,7 @@ function arrowTracks(spec, zoom, loopLength) {
         const span = Math.abs(ts[ts.length - 1] - ts[0]);
         if (length < 2 * size || !(span > 0)) continue;
         const period = spec.pulseSpacing || loopLength;
-        const n = Math.min(MAX_ARROWS_PER_ROW, Math.max(1, Math.round(period * length / (span * spacing))));
+        const n = Math.min(MAX_ARROWS_PER_ROW, Math.max(1, Math.floor(period * length / (span * spacing))));
         const color = arrowheads.color || (getColor ? row[getColor] : spec.getColor) || DEFAULT_TRIPS_COLOR;
         tracks.push({ xy, ts, step: period / n, color });
     }
@@ -205,9 +205,9 @@ function expandPulses(spec) {
  *   whatever Python put in the data list (snake_case). No camelCase conversion happens.
  */
 function buildLayer(spec, currentTime) {
-    // `loopLength`, `pulseSpacing` and `arrowheads` are read by the parent component
-    // (rAF loop, pulse copies, arrowhead layer); strip them so deck.gl never sees them.
-    const { _type, _accessors = {}, loopLength, pulseSpacing, arrowheads, ...rest } = spec;
+    // `loopLength`, `pulseSpacing`, `speedZoom` and `arrowheads` are read by the parent
+    // component (rAF loop, pulse copies, arrowhead layer); strip them so deck.gl never sees them.
+    const { _type, _accessors = {}, loopLength, pulseSpacing, speedZoom, arrowheads, ...rest } = spec;
     const LayerClass = LAYER_MAP[_type];
     if (!LayerClass) {
         console.warn(`EpecDeckMap: unknown layer type "${_type}" — skipping`);
@@ -284,12 +284,20 @@ function EpecDeckMap({
     // Advanced by the rAF loop below; only meaningful when trips layers exist.
     const [currentTime, setCurrentTime] = useState(0);
 
-    // Zoom in half-level steps; arrowhead spacing is recomputed only when it changes.
-    const [zoomKey, setZoomKey] = useState(() => Math.round(((viewState && viewState.zoom) || 4) * 2) / 2);
-    const onViewStateChange = useCallback(
-        ({ viewState: vs }) => setZoomKey(Math.round(vs.zoom * 2) / 2),
-        [],
-    );
+    // Live zoom for the clock rate (a ref, so no re-render), and zoom in half-level
+    // steps for arrowhead spacing, which is recomputed only when the step changes.
+    const zoomRef = useRef((viewState && viewState.zoom) || 4);
+    const [zoomKey, setZoomKey] = useState(() => Math.round(zoomRef.current * 2) / 2);
+    const onViewStateChange = useCallback(({ viewState: vs }) => {
+        zoomRef.current = vs.zoom;
+        setZoomKey(Math.round(vs.zoom * 2) / 2);
+    }, []);
+
+    // The first trips spec's speedZoom, if any, sets the shared clock rate.
+    const speedZoom = useMemo(() => {
+        const s = tripsSpecs.find(t => t.speedZoom != null);
+        return s ? Number(s.speedZoom) : null;
+    }, [tripsSpecs]);
     const arrowSets = useMemo(
         () => tripsSpecs.map(s => arrowTracks(s, zoomKey, loopLength)).filter(Boolean),
         [tripsSpecs, zoomKey, loopLength],
@@ -303,21 +311,27 @@ function EpecDeckMap({
         }
 
         let rafId = null;
-        let startTs = null;
+        let prevTs = null;
         let lastFrameTs = 0;
+        let time = 0;
 
+        // Integrated rather than derived from elapsed time, so a rate change on zoom never jumps.
         const tick = (ts) => {
             rafId = requestAnimationFrame(tick);
             if (ts - lastFrameTs < FRAME_INTERVAL_MS) return;  // throttle
             lastFrameTs = ts;
-            if (startTs == null) startTs = ts;
-            const phase = ((ts - startTs) % CYCLE_DURATION_MS) / CYCLE_DURATION_MS;
-            setCurrentTime(phase * loopLength);
+            const rate = speedZoom == null ? 1 : 2 ** (speedZoom - zoomRef.current);
+            if (prevTs != null) {
+                time = (time + (ts - prevTs) * rate * loopLength / CYCLE_DURATION_MS) % loopLength;
+            }
+            prevTs = ts;
+            setCurrentTime(time);
         };
 
         const start = () => {
             if (rafId == null) {
-                startTs = null;
+                prevTs = null;
+                time = 0;
                 lastFrameTs = 0;
                 rafId = requestAnimationFrame(tick);
             }
@@ -341,7 +355,7 @@ function EpecDeckMap({
             document.removeEventListener('visibilitychange', onVisibility);
             stop();
         };
-    }, [tripsSpecs, loopLength]);
+    }, [tripsSpecs, loopLength, speedZoom]);
 
     // Trips layers rebuilt each frame with the current time; drawn on top of the
     // static layers. deck.gl diffs efficiently, so only these update per frame.
