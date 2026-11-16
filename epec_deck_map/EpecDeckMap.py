@@ -4,6 +4,8 @@
 
 from dash.development.base_component import Component, _explicitize_args
 
+from .validation import validate_layers
+
 
 class EpecDeckMap(Component):
     """EpecDeckMap — custom deck.gl wrapper for MM Client Portal.
@@ -19,6 +21,8 @@ class EpecDeckMap(Component):
         Layer spec dicts.  Each dict must have ``_type`` (the deck.gl class
         name), ``_accessors`` (mapping camelCase prop → snake_case data key),
         and any additional static props understood by that layer class.
+        Validated on construction (``validate_layers``); a callback that
+        returns ``layers`` bypasses this, so call ``validate_layers`` there.
     viewState : dict
         Initial camera ``{latitude, longitude, zoom, pitch}``.  Used once on
         mount; user pan/zoom is managed internally by deck.gl.
@@ -78,6 +82,9 @@ class EpecDeckMap(Component):
         self._valid_wildcard_attributes = []
         self.available_properties = EpecDeckMap._prop_names
         self.available_wildcard_properties = []
+
+        if layers is not Component.UNDEFINED and layers is not None:
+            validate_layers(layers)
 
         _explicit_args = kwargs.pop('_explicit_args')
         _locals = locals()

@@ -5,7 +5,7 @@ setup(
     version='0.2.0',
     description='Custom deck.gl Dash component — direct layer construction, no @deck.gl/json',
     packages=find_packages(),
-    package_data={'epec_deck_map': ['epec_deck_map.min.js']},
+    package_data={'epec_deck_map': ['epec_deck_map.min.js', 'layer_props.json']},
     install_requires=['dash>=2.0.0'],
     python_requires='>=3.9',
 )

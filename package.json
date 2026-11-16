@@ -6,8 +6,9 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "build": "webpack --mode production",
-    "build:dev": "webpack --mode development"
+    "build": "npm run gen:props && webpack --mode production",
+    "build:dev": "npm run gen:props && webpack --mode development",
+    "gen:props": "node scripts/gen-layer-props.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "^9.1.0",
