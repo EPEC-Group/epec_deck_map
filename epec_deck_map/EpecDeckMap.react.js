@@ -55,7 +55,8 @@ function getArrowAtlas() {
         ctx.lineTo(20, 32);
         ctx.closePath();
         ctx.fill();
-        arrowAtlas = canvas.toDataURL();
+        // The canvas itself, not a data: URL, which deck.gl would fetch and a strict CSP connect-src blocks.
+        arrowAtlas = canvas;
     }
     return arrowAtlas;
 }
