@@ -101,7 +101,7 @@ function arrowTracks(spec, zoom, loopLength) {
         }
         length *= scale;
         const span = Math.abs(ts[ts.length - 1] - ts[0]);
-        if (length < 2 * size || !(span > 0)) continue;
+        if (length < Math.max(2 * size, arrowheads.minLength || 0) || !(span > 0)) continue;
         const period = spec.pulseSpacing > 0
             ? rowPulseSpacing(span, spec.trailLength != null ? spec.trailLength : DEFAULT_TRAIL_LENGTH, spec.pulseSpacing)
             : loopLength;

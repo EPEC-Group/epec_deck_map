@@ -23,12 +23,13 @@ class EpecDeckMap(Component):
         "color": [r, g, b, a]}`` (all optional; defaults 8, 150, the pulse
         colour): arrowheads ride each pulse head pointing in the direction of
         travel (increasing timestamp) and repeat about ``spacing`` screen
-        pixels apart on long lines. Not pickable.
+        pixels apart on long lines. Lines shorter on screen than two arrows,
+        or than ``minLength`` px if set, get none. Not pickable.
         A TripsLayer spec may also set ``pulseSpacing`` (timestamp units, e.g.
         km): each row then carries a pulse every ``pulseSpacing`` along it, all
-        at one speed (a row shorter than ``pulseSpacing`` plus ``trailLength``
-        gets the largest whole fraction of it that fits, so it always shows a
-        pulse), and ``loopLength`` defaults to ``pulseSpacing`` (keep them
+        at one speed (a row shorter than ``pulseSpacing`` gets the largest
+        whole fraction of it no longer than the row, floored at half
+        ``trailLength``, so it always carries a pulse head), and ``loopLength`` defaults to ``pulseSpacing`` (keep them
         equal so pulses hand over seamlessly at the cycle wrap).
         ``speedZoom`` (number) slows the clock when zoomed in past that zoom:
         it runs at 2 ** (-speedZoomStrength * max(0, zoom - speedZoom)) times

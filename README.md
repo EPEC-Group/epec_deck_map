@@ -71,11 +71,11 @@ See the docstring in [epec_deck_map/EpecDeckMap.py](epec_deck_map/EpecDeckMap.py
 
 ### Pulse arrowheads
 
-A `TripsLayer` spec may add `"arrowheads": {"size": 8, "spacing": 150, "color": [r, g, b, a]}` (every key optional). Arrowheads ride each pulse head pointing in the direction of travel (increasing timestamp, so a reversed timestamp array flips them with the pulse) and repeat about `spacing` screen pixels apart along long lines, moving with the pulse. Colour defaults to the pulse colour. Lines shorter on screen than two arrows get none. Arrows are not pickable.
+A `TripsLayer` spec may add `"arrowheads": {"size": 8, "spacing": 150, "color": [r, g, b, a]}` (every key optional). Arrowheads ride each pulse head pointing in the direction of travel (increasing timestamp, so a reversed timestamp array flips them with the pulse) and repeat about `spacing` screen pixels apart along long lines, moving with the pulse. Colour defaults to the pulse colour. Lines shorter on screen than two arrows, or than `"minLength"` pixels if set, get none, so short lines only gain arrows once zoomed in far enough. Arrows are not pickable.
 
 ### Constant-speed pulses
 
-With timestamps in distance along the line (e.g. km), set `"pulseSpacing": 150` on a `TripsLayer` spec: every row carries a pulse every 150 km, all moving at one speed (150 km per 4 s cycle), and arrowheads ride every pulse. A row shorter than `pulseSpacing` plus `trailLength` gets a tighter gap (the largest whole fraction of `pulseSpacing` that fits), so it is never without a pulse. `loopLength` defaults to `pulseSpacing`; leave it unset or equal so pulses hand over seamlessly at the cycle wrap. `trailLength` is in the same units.
+With timestamps in distance along the line (e.g. km), set `"pulseSpacing": 150` on a `TripsLayer` spec: every row carries a pulse every 150 km, all moving at one speed (150 km per 4 s cycle), and arrowheads ride every pulse. A row shorter than `pulseSpacing` gets a tighter gap (the largest whole fraction of `pulseSpacing` no longer than the row, floored at half `trailLength`), so it always carries a pulse head. `loopLength` defaults to `pulseSpacing`; leave it unset or equal so pulses hand over seamlessly at the cycle wrap. `trailLength` is in the same units.
 
 Add `"speedZoom": 6` to slow pulses down when zoomed in past zoom 6: the clock runs at `2 ** (-speedZoomStrength * max(0, zoom - speedZoom))` times its normal rate, so a cycle takes 4 s at or below zoom 6. `"speedZoomStrength"` defaults to 1, which keeps on-screen speed constant beyond `speedZoom` (twice as long per level); a value between 0 and 1 only damps the speed-up. The first trips spec that sets `speedZoom` drives the shared clock.
 
