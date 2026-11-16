@@ -24,6 +24,10 @@ class EpecDeckMap(Component):
         colour): arrowheads ride each pulse head pointing in the direction of
         travel (increasing timestamp) and repeat about ``spacing`` screen
         pixels apart on long lines. Not pickable.
+        A TripsLayer spec may also set ``pulseSpacing`` (timestamp units, e.g.
+        km): each row then carries a pulse every ``pulseSpacing`` along it, all
+        at one speed, and ``loopLength`` defaults to ``pulseSpacing`` (keep them
+        equal so pulses hand over seamlessly at the cycle wrap).
     viewState : dict
         Initial camera ``{latitude, longitude, zoom, pitch}``.  Used once on
         mount; user pan/zoom is managed internally by deck.gl.

@@ -73,6 +73,10 @@ See the docstring in [epec_deck_map/EpecDeckMap.py](epec_deck_map/EpecDeckMap.py
 
 A `TripsLayer` spec may add `"arrowheads": {"size": 8, "spacing": 150, "color": [r, g, b, a]}` (every key optional). Arrowheads ride each pulse head pointing in the direction of travel (increasing timestamp, so a reversed timestamp array flips them with the pulse) and repeat about `spacing` screen pixels apart along long lines, moving with the pulse. Colour defaults to the pulse colour. Lines shorter on screen than two arrows get none. Arrows are not pickable.
 
+### Constant-speed pulses
+
+With timestamps in distance along the line (e.g. km), set `"pulseSpacing": 150` on a `TripsLayer` spec: every row carries a pulse every 150 km, all moving at one speed (150 km per 4 s cycle), and arrowheads ride every pulse. `loopLength` defaults to `pulseSpacing`; leave it unset or equal so pulses hand over seamlessly at the cycle wrap. `trailLength` is in the same units.
+
 ## Rebuilding the bundle
 
 Node 18 or later is required.

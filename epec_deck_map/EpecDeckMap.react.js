@@ -77,8 +77,9 @@ function fromWorld(x, y) {
  * Per-row arrowhead geometry for a trips spec with an `arrowheads` key, or null.
  *
  * Each row gets a timestamp step that puts consecutive arrows about `spacing`
- * screen pixels apart at this zoom, snapped so loopLength is a whole number of
- * steps (the arrows then cycle seamlessly with the pulse). Rows shorter on
+ * screen pixels apart at this zoom, snapped so the pulse period (pulseSpacing,
+ * else loopLength) is a whole number of steps: every pulse head carries an
+ * arrow and the arrows cycle seamlessly with the pulses. Rows shorter on
  * screen than two arrows get none.
  */
 function arrowTracks(spec, zoom, loopLength) {
@@ -101,9 +102,10 @@ function arrowTracks(spec, zoom, loopLength) {
         length *= scale;
         const span = Math.abs(ts[ts.length - 1] - ts[0]);
         if (length < 2 * size || !(span > 0)) continue;
-        const n = Math.min(MAX_ARROWS_PER_ROW, Math.max(1, Math.round(loopLength * length / (span * spacing))));
+        const period = spec.pulseSpacing || loopLength;
+        const n = Math.min(MAX_ARROWS_PER_ROW, Math.max(1, Math.round(period * length / (span * spacing))));
         const color = arrowheads.color || (getColor ? row[getColor] : spec.getColor) || DEFAULT_TRIPS_COLOR;
-        tracks.push({ xy, ts, step: loopLength / n, color });
+        tracks.push({ xy, ts, step: period / n, color });
     }
     return { id: `${id}-arrowheads`, size, tracks };
 }
@@ -151,6 +153,31 @@ function arrowheadLayer({ id, size, tracks }, currentTime) {
 }
 
 /**
+ * A trips spec with each row repeated every `pulseSpacing` timestamp units.
+ *
+ * Copy k has timestamps shifted by -k * pulseSpacing, so with currentTime
+ * sweeping 0..pulseSpacing the heads sit at currentTime + k * pulseSpacing:
+ * evenly spaced pulses at one speed that hand over seamlessly at the wrap.
+ */
+function expandPulses(spec) {
+    const { pulseSpacing, _accessors = {}, data } = spec;
+    const key = _accessors.getTimestamps;
+    if (!(pulseSpacing > 0) || !key || !data) return spec;
+    const trail = spec.trailLength != null ? spec.trailLength : DEFAULT_TRAIL_LENGTH;
+    const rows = [];
+    for (const row of data) {
+        const ts = row[key];
+        if (!ts || ts.length === 0) continue;
+        const lo = Math.min(ts[0], ts[ts.length - 1]);
+        const hi = Math.max(ts[0], ts[ts.length - 1]);
+        for (let k = Math.floor(lo / pulseSpacing); k <= Math.ceil((hi + trail) / pulseSpacing); k++) {
+            rows.push(k === 0 ? row : { ...row, [key]: ts.map(t => t - k * pulseSpacing) });
+        }
+    }
+    return { ...spec, data: rows };
+}
+
+/**
  * Convert a layer spec dict (from Python) into a real deck.gl Layer instance.
  *
  * Spec format:
@@ -178,9 +205,9 @@ function arrowheadLayer({ id, size, tracks }, currentTime) {
  *   whatever Python put in the data list (snake_case). No camelCase conversion happens.
  */
 function buildLayer(spec, currentTime) {
-    // `loopLength` and `arrowheads` are read by the parent component (rAF loop,
-    // arrowhead layer); strip them so they are never passed as deck.gl props.
-    const { _type, _accessors = {}, loopLength, arrowheads, ...rest } = spec;
+    // `loopLength`, `pulseSpacing` and `arrowheads` are read by the parent component
+    // (rAF loop, pulse copies, arrowhead layer); strip them so deck.gl never sees them.
+    const { _type, _accessors = {}, loopLength, pulseSpacing, arrowheads, ...rest } = spec;
     const LayerClass = LAYER_MAP[_type];
     if (!LayerClass) {
         console.warn(`EpecDeckMap: unknown layer type "${_type}" — skipping`);
@@ -243,11 +270,12 @@ function EpecDeckMap({
     );
 
     // A single shared cycle length for all pulses: the max loopLength across
-    // trips specs (falling back to the default). currentTime sweeps 0..loopLength.
+    // trips specs (pulseSpacing where loopLength is unset, else the default).
+    // currentTime sweeps 0..loopLength.
     const loopLength = useMemo(() => {
         let maxLen = 0;
         for (const s of tripsSpecs) {
-            const v = Number(s.loopLength);
+            const v = Number(s.loopLength != null ? s.loopLength : s.pulseSpacing);
             if (Number.isFinite(v) && v > maxLen) maxLen = v;
         }
         return maxLen > 0 ? maxLen : DEFAULT_LOOP_LENGTH;
@@ -317,12 +345,15 @@ function EpecDeckMap({
 
     // Trips layers rebuilt each frame with the current time; drawn on top of the
     // static layers. deck.gl diffs efficiently, so only these update per frame.
+    // Pulse copies are built once per layers update; each frame reuses the same data arrays.
+    const pulseSpecs = useMemo(() => tripsSpecs.map(expandPulses), [tripsSpecs]);
+
     const tripsLayers = useMemo(
         () => [
-            ...tripsSpecs.map(s => buildLayer(s, currentTime)).filter(Boolean),
+            ...pulseSpecs.map(s => buildLayer(s, currentTime)).filter(Boolean),
             ...arrowSets.map(a => arrowheadLayer(a, currentTime)),
         ],
-        [tripsSpecs, arrowSets, currentTime],
+        [pulseSpecs, arrowSets, currentTime],
     );
 
     const deckLayers = useMemo(
