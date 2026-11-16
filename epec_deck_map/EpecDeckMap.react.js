@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
 import DeckGL from '@deck.gl/react';
-import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
+import { IconLayer, PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { TripsLayer } from '@deck.gl/geo-layers';
 import { Map } from 'react-map-gl/maplibre';
 import maplibregl from 'maplibre-gl';
@@ -28,6 +28,126 @@ const FRAME_INTERVAL_MS = 1000 / 30;   // throttle the rAF loop to ~30fps
 const CYCLE_DURATION_MS = 4000;        // one full 0..loopLength cycle every 4s
 const DEFAULT_LOOP_LENGTH = 1.0;
 const DEFAULT_TRAIL_LENGTH = 0.3;
+
+const DEFAULT_ARROW_SIZE = 8;
+const DEFAULT_ARROW_SPACING = 150;
+const MAX_ARROWS_PER_ROW = 64;
+const DEFAULT_TRIPS_COLOR = [0, 0, 0, 255];
+const ARROW_ICON_PX = 64;
+const ARROW_MAPPING = {
+    // Anchored at the tip so the arrow ends exactly on the pulse head.
+    arrow: { x: 0, y: 0, width: ARROW_ICON_PX, height: ARROW_ICON_PX, anchorX: 60, anchorY: 32, mask: true },
+};
+let arrowAtlas = null;
+
+/** Lazily drawn white arrowhead pointing east, tinted per arrow via mask. */
+function getArrowAtlas() {
+    if (!arrowAtlas) {
+        const canvas = document.createElement('canvas');
+        canvas.width = ARROW_ICON_PX;
+        canvas.height = ARROW_ICON_PX;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.moveTo(6, 8);
+        ctx.lineTo(60, 32);
+        ctx.lineTo(6, 56);
+        ctx.lineTo(20, 32);
+        ctx.closePath();
+        ctx.fill();
+        arrowAtlas = canvas.toDataURL();
+    }
+    return arrowAtlas;
+}
+
+/** [lng, lat] to Web Mercator world units at zoom 0 (512 wide, y north). */
+function toWorld([lng, lat]) {
+    const phi = lat * Math.PI / 180;
+    return [512 * (lng + 180) / 360, 512 * (0.5 + Math.log(Math.tan(Math.PI / 4 + phi / 2)) / (2 * Math.PI))];
+}
+
+/** Inverse of toWorld. */
+function fromWorld(x, y) {
+    const lat = 2 * Math.atan(Math.exp((y / 512 - 0.5) * 2 * Math.PI)) - Math.PI / 2;
+    return [x / 512 * 360 - 180, lat * 180 / Math.PI];
+}
+
+/**
+ * Per-row arrowhead geometry for a trips spec with an `arrowheads` key, or null.
+ *
+ * Each row gets a timestamp step that puts consecutive arrows about `spacing`
+ * screen pixels apart at this zoom, snapped so loopLength is a whole number of
+ * steps (the arrows then cycle seamlessly with the pulse). Rows shorter on
+ * screen than two arrows get none.
+ */
+function arrowTracks(spec, zoom, loopLength) {
+    const { arrowheads, _accessors = {}, data, id } = spec;
+    if (!arrowheads) return null;
+    const size = arrowheads.size || DEFAULT_ARROW_SIZE;
+    const spacing = Math.max(arrowheads.spacing || DEFAULT_ARROW_SPACING, size);
+    const scale = 2 ** zoom;
+    const { getPath, getTimestamps, getColor } = _accessors;
+    const tracks = [];
+    for (const row of (data || [])) {
+        const path = row[getPath];
+        const ts = row[getTimestamps];
+        if (!path || !ts || path.length < 2 || ts.length !== path.length) continue;
+        const xy = path.map(toWorld);
+        let length = 0;
+        for (let i = 1; i < xy.length; i++) {
+            length += Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]);
+        }
+        length *= scale;
+        const span = Math.abs(ts[ts.length - 1] - ts[0]);
+        if (length < 2 * size || !(span > 0)) continue;
+        const n = Math.min(MAX_ARROWS_PER_ROW, Math.max(1, Math.round(loopLength * length / (span * spacing))));
+        const color = arrowheads.color || (getColor ? row[getColor] : spec.getColor) || DEFAULT_TRIPS_COLOR;
+        tracks.push({ xy, ts, step: loopLength / n, color });
+    }
+    return { id: `${id}-arrowheads`, size, tracks };
+}
+
+/** Arrowheads at every timestamp congruent to currentTime modulo each row's step. */
+function arrowheadLayer({ id, size, tracks }, currentTime) {
+    const arrows = [];
+    for (const { xy, ts, step, color } of tracks) {
+        const last = ts.length - 1;
+        const rising = ts[last] >= ts[0];
+        const lo = rising ? ts[0] : ts[last];
+        const hi = rising ? ts[last] : ts[0];
+        for (let t = lo + (((currentTime - lo) % step) + step) % step; t <= hi; t += step) {
+            let a = 0;
+            let b = last;
+            while (b - a > 1) {
+                const m = (a + b) >> 1;
+                if ((ts[m] <= t) === rising) a = m; else b = m;
+            }
+            const f = ts[b] === ts[a] ? 0 : (t - ts[a]) / (ts[b] - ts[a]);
+            const dx = xy[b][0] - xy[a][0];
+            const dy = xy[b][1] - xy[a][1];
+            const dir = rising ? 1 : -1;
+            arrows.push({
+                position: fromWorld(xy[a][0] + f * dx, xy[a][1] + f * dy),
+                angle: Math.atan2(dir * dy, dir * dx) * 180 / Math.PI,
+                color,
+            });
+        }
+    }
+    return new IconLayer({
+        id,
+        data: arrows,
+        iconAtlas: getArrowAtlas(),
+        iconMapping: ARROW_MAPPING,
+        getIcon: () => 'arrow',
+        getPosition: d => d.position,
+        getAngle: d => d.angle,
+        getColor: d => d.color,
+        getSize: size,
+        sizeUnits: 'pixels',
+        billboard: false,
+        pickable: false,
+    });
+}
 
 /**
  * Convert a layer spec dict (from Python) into a real deck.gl Layer instance.
@@ -57,9 +177,9 @@ const DEFAULT_TRAIL_LENGTH = 0.3;
  *   whatever Python put in the data list (snake_case). No camelCase conversion happens.
  */
 function buildLayer(spec, currentTime) {
-    // `loopLength` is an animation control read by the parent component (see the
-    // rAF loop below); strip it so it is never passed as an unknown deck.gl prop.
-    const { _type, _accessors = {}, loopLength, ...rest } = spec;
+    // `loopLength` and `arrowheads` are read by the parent component (rAF loop,
+    // arrowhead layer); strip them so they are never passed as deck.gl props.
+    const { _type, _accessors = {}, loopLength, arrowheads, ...rest } = spec;
     const LayerClass = LAYER_MAP[_type];
     if (!LayerClass) {
         console.warn(`EpecDeckMap: unknown layer type "${_type}" — skipping`);
@@ -135,6 +255,17 @@ function EpecDeckMap({
     // Advanced by the rAF loop below; only meaningful when trips layers exist.
     const [currentTime, setCurrentTime] = useState(0);
 
+    // Zoom in half-level steps; arrowhead spacing is recomputed only when it changes.
+    const [zoomKey, setZoomKey] = useState(() => Math.round(((viewState && viewState.zoom) || 4) * 2) / 2);
+    const onViewStateChange = useCallback(
+        ({ viewState: vs }) => setZoomKey(Math.round(vs.zoom * 2) / 2),
+        [],
+    );
+    const arrowSets = useMemo(
+        () => tripsSpecs.map(s => arrowTracks(s, zoomKey, loopLength)).filter(Boolean),
+        [tripsSpecs, zoomKey, loopLength],
+    );
+
     // Animation loop — runs only while there is at least one TripsLayer spec and
     // the tab is visible. Throttled to ~30fps; pauses on visibilitychange.
     useEffect(() => {
@@ -186,8 +317,11 @@ function EpecDeckMap({
     // Trips layers rebuilt each frame with the current time; drawn on top of the
     // static layers. deck.gl diffs efficiently, so only these update per frame.
     const tripsLayers = useMemo(
-        () => tripsSpecs.map(s => buildLayer(s, currentTime)).filter(Boolean),
-        [tripsSpecs, currentTime],
+        () => [
+            ...tripsSpecs.map(s => buildLayer(s, currentTime)).filter(Boolean),
+            ...arrowSets.map(a => arrowheadLayer(a, currentTime)),
+        ],
+        [tripsSpecs, arrowSets, currentTime],
     );
 
     const deckLayers = useMemo(
@@ -243,6 +377,7 @@ function EpecDeckMap({
                 layers={deckLayers}
                 pickingRadius={pickingRadius != null ? pickingRadius : 5}
                 onClick={handleClick}
+                onViewStateChange={onViewStateChange}
                 getTooltip={getTooltip}
             >
                 {/* maplibre-gl basemap — no Mapbox token required for Carto tiles */}

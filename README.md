@@ -69,6 +69,10 @@ See the docstring in [epec_deck_map/EpecDeckMap.py](epec_deck_map/EpecDeckMap.py
 | `tooltip` | dict | `{"style": {...}}` applied to the tooltip container. Each data row supplies its own HTML in its `tooltip` field. |
 | `clickInfo` | dict | Output-only. Set on click: `{"object": <row>, "coordinate": [lon, lat], "layerId": str}`. |
 
+### Pulse arrowheads
+
+A `TripsLayer` spec may add `"arrowheads": {"size": 8, "spacing": 150, "color": [r, g, b, a]}` (every key optional). Arrowheads ride each pulse head pointing in the direction of travel (increasing timestamp, so a reversed timestamp array flips them with the pulse) and repeat about `spacing` screen pixels apart along long lines, moving with the pulse. Colour defaults to the pulse colour. Lines shorter on screen than two arrows get none. Arrows are not pickable.
+
 ## Rebuilding the bundle
 
 Node 18 or later is required.

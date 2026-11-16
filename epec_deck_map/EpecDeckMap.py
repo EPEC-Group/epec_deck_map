@@ -19,6 +19,11 @@ class EpecDeckMap(Component):
         Layer spec dicts.  Each dict must have ``_type`` (the deck.gl class
         name), ``_accessors`` (mapping camelCase prop → snake_case data key),
         and any additional static props understood by that layer class.
+        A TripsLayer spec may add ``arrowheads: {"size": px, "spacing": px,
+        "color": [r, g, b, a]}`` (all optional; defaults 8, 150, the pulse
+        colour): arrowheads ride each pulse head pointing in the direction of
+        travel (increasing timestamp) and repeat about ``spacing`` screen
+        pixels apart on long lines. Not pickable.
     viewState : dict
         Initial camera ``{latitude, longitude, zoom, pitch}``.  Used once on
         mount; user pan/zoom is managed internally by deck.gl.
