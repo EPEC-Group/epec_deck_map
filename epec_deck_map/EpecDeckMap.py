@@ -30,7 +30,10 @@ class EpecDeckMap(Component):
         equal so pulses hand over seamlessly at the cycle wrap).
         ``speedZoom`` (number) keeps pulse speed constant on screen: the clock
         runs at 2 ** (speedZoom - zoom) times its normal rate, so one cycle takes
-        4 s at that zoom. The first trips spec that sets it drives the shared clock.
+        4 s at that zoom. ``speedZoomStrength`` (default 1) scales the exponent:
+        0 keeps ground speed constant, between 0 and 1 damps the on-screen
+        speed-up when zooming in. The first trips spec that sets ``speedZoom``
+        drives the shared clock.
     viewState : dict
         Initial camera ``{latitude, longitude, zoom, pitch}``.  Used once on
         mount; user pan/zoom is managed internally by deck.gl.

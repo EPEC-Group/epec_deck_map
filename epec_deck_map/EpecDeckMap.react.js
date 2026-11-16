@@ -207,7 +207,7 @@ function expandPulses(spec) {
 function buildLayer(spec, currentTime) {
     // `loopLength`, `pulseSpacing`, `speedZoom` and `arrowheads` are read by the parent
     // component (rAF loop, pulse copies, arrowhead layer); strip them so deck.gl never sees them.
-    const { _type, _accessors = {}, loopLength, pulseSpacing, speedZoom, arrowheads, ...rest } = spec;
+    const { _type, _accessors = {}, loopLength, pulseSpacing, speedZoom, speedZoomStrength, arrowheads, ...rest } = spec;
     const LayerClass = LAYER_MAP[_type];
     if (!LayerClass) {
         console.warn(`EpecDeckMap: unknown layer type "${_type}" — skipping`);
@@ -293,10 +293,12 @@ function EpecDeckMap({
         setZoomKey(Math.round(vs.zoom * 2) / 2);
     }, []);
 
-    // The first trips spec's speedZoom, if any, sets the shared clock rate.
-    const speedZoom = useMemo(() => {
+    // The first trips spec's speedZoom / speedZoomStrength, if any, set the shared clock rate.
+    const [speedZoom, speedZoomStrength] = useMemo(() => {
         const s = tripsSpecs.find(t => t.speedZoom != null);
-        return s ? Number(s.speedZoom) : null;
+        if (!s) return [null, 1];
+        const k = Number(s.speedZoomStrength);
+        return [Number(s.speedZoom), Number.isFinite(k) ? k : 1];
     }, [tripsSpecs]);
     const arrowSets = useMemo(
         () => tripsSpecs.map(s => arrowTracks(s, zoomKey, loopLength)).filter(Boolean),
@@ -320,7 +322,7 @@ function EpecDeckMap({
             rafId = requestAnimationFrame(tick);
             if (ts - lastFrameTs < FRAME_INTERVAL_MS) return;  // throttle
             lastFrameTs = ts;
-            const rate = speedZoom == null ? 1 : 2 ** (speedZoom - zoomRef.current);
+            const rate = speedZoom == null ? 1 : 2 ** (speedZoomStrength * (speedZoom - zoomRef.current));
             if (prevTs != null) {
                 time = (time + (ts - prevTs) * rate * loopLength / CYCLE_DURATION_MS) % loopLength;
             }
@@ -355,7 +357,7 @@ function EpecDeckMap({
             document.removeEventListener('visibilitychange', onVisibility);
             stop();
         };
-    }, [tripsSpecs, loopLength, speedZoom]);
+    }, [tripsSpecs, loopLength, speedZoom, speedZoomStrength]);
 
     // Trips layers rebuilt each frame with the current time; drawn on top of the
     // static layers. deck.gl diffs efficiently, so only these update per frame.
