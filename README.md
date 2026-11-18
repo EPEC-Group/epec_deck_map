@@ -58,24 +58,15 @@ if __name__ == "__main__":
 
 ### Updating one layer
 
-Returning a whole `layers` list re-sends every layer and makes deck.gl recompute
-every layer's attributes, because each `data` list arrives as a new object. To
-change one layer, return a `Patch()` instead: only the patched value crosses the
-wire, and the other layers keep their `data` identity so deck.gl skips them.
-
 ```python
 from dash import Patch
 
 @app.callback(Output("map", "layers"), Input("interval-slider", "value"))
 def recolour_lines(t):
     p = Patch()
-    p[0]["data"] = line_rows_at(t)           # layer 0 only
-    # p[0]["_accessors"]["getColor"] = "headroom_colour"   # re-point an accessor
+    p[0]["data"] = line_rows_at(t)
     return p
 ```
-
-Index layers by position in the list. Patching `_accessors` alone (same `data`)
-also redraws that layer.
 
 ### Prop reference
 
