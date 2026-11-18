@@ -31,8 +31,7 @@ const CYCLE_DURATION_MS = 4000;        // one full 0..loopLength cycle every 4s
 const DEFAULT_LOOP_LENGTH = 1.0;
 const DEFAULT_TRAIL_LENGTH = 0.3;
 
-const DEFAULT_CHEVRONS = { interval: 80, size: 6, color: [255, 255, 255, 255], clearance: 8, maxTurn: 35 };
-const MAX_CHEVRONS_PER_ROW = 200;
+const DEFAULT_CHEVRONS = { interval: 80, size: 6, color: [255, 255, 255, 255], clearance: 8, maxTurn: 35, speed: 0 };
 const CHEVRON_ICON_PX = 64;
 const CHEVRON_MAPPING = {
     chevron: { x: 0, y: 0, width: CHEVRON_ICON_PX, height: CHEVRON_ICON_PX, anchorX: 32, anchorY: 32, mask: true },
@@ -70,15 +69,14 @@ function fromWorld(x, y) {
     return [x / 512 * 360 - 180, lat * 180 / Math.PI];
 }
 
-/** Chevrons every `interval` px along rows whose direction is 1 (vertex order) or -1. */
-function chevronLayer(spec, zoom) {
+/** Per-row world geometry for a spec with `chevrons`, or null. */
+function chevronTracks(spec) {
     const { chevrons, _accessors = {}, data, id } = spec;
     const { getPath, getDirection } = _accessors;
     if (!chevrons || !data || !getPath || !getDirection) return null;
-    const { interval, size, color, clearance, maxTurn } = { ...DEFAULT_CHEVRONS, ...chevrons };
-    const scale = 2 ** zoom;
-    const cosMax = Math.cos(maxTurn * Math.PI / 180);
-    const marks = [];
+    const opts = { ...DEFAULT_CHEVRONS, ...chevrons };
+    const cosMax = Math.cos(opts.maxTurn * Math.PI / 180);
+    const rows = [];
     for (const row of data) {
         const dir = Number(row[getDirection]);
         const path = row[getPath];
@@ -86,10 +84,8 @@ function chevronLayer(spec, zoom) {
         const xy = path.map(toWorld);
         const cum = [0];
         for (let i = 1; i < xy.length; i++) {
-            cum.push(cum[i - 1] + Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]) * scale);
+            cum.push(cum[i - 1] + Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]));
         }
-        const length = cum[cum.length - 1];
-        if (length < 2 * size) continue;
         const sharp = [];
         for (let i = 1; i < xy.length - 1; i++) {
             const ax = xy[i][0] - xy[i - 1][0];
@@ -99,25 +95,49 @@ function chevronLayer(spec, zoom) {
             const d = Math.hypot(ax, ay) * Math.hypot(bx, by);
             if (d > 0 && (ax * bx + ay * by) / d < cosMax) sharp.push(cum[i]);
         }
-        const n = Math.min(MAX_CHEVRONS_PER_ROW, Math.max(1, Math.floor(length / interval)));
-        const start = (length - (n - 1) * interval) / 2;
-        let b = 1;
-        for (let k = 0; k < n; k++) {
-            const at = start + k * interval;
-            if (sharp.some(v => Math.abs(v - at) < clearance)) continue;
-            while (b < cum.length - 1 && cum[b] < at) b++;
+        const xs = xy.map(p => p[0]);
+        const ys = xy.map(p => p[1]);
+        rows.push({
+            xy, cum, sharp, dir,
+            box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)],
+        });
+    }
+    return { id: `${id}-chevrons`, spec, opts, rows };
+}
+
+const outside = (box, v) => box[2] < v[0] || box[0] > v[2] || box[3] < v[1] || box[1] > v[3];
+
+/** Chevrons inside world rect `view`, every `interval` px, shifted `travel` px along the flow. */
+function chevronLayer({ id, spec, opts, rows }, zoom, view, travel) {
+    const { interval, size, color, clearance } = opts;
+    const scale = 2 ** zoom;
+    const marks = [];
+    for (const { xy, cum, sharp, dir, box } of rows) {
+        if (outside(box, view)) continue;
+        const length = cum[cum.length - 1] * scale;
+        if (length < 2 * size) continue;
+        const base = ((((length % interval) / 2 + dir * travel) % interval) + interval) % interval;
+        for (let b = 1; b < xy.length; b++) {
             const a = b - 1;
-            const f = cum[b] === cum[a] ? 0 : (at - cum[a]) / (cum[b] - cum[a]);
+            const seg = [
+                Math.min(xy[a][0], xy[b][0]), Math.min(xy[a][1], xy[b][1]),
+                Math.max(xy[a][0], xy[b][0]), Math.max(xy[a][1], xy[b][1]),
+            ];
+            const s0 = cum[a] * scale;
+            const s1 = cum[b] * scale;
+            if (!(s1 > s0) || outside(seg, view)) continue;
             const dx = xy[b][0] - xy[a][0];
             const dy = xy[b][1] - xy[a][1];
-            marks.push({
-                position: fromWorld(xy[a][0] + f * dx, xy[a][1] + f * dy),
-                angle: Math.atan2(dir * dy, dir * dx) * 180 / Math.PI,
-            });
+            const angle = Math.atan2(dir * dy, dir * dx) * 180 / Math.PI;
+            for (let at = base + Math.ceil((s0 - base) / interval) * interval; at < s1; at += interval) {
+                if (sharp.some(v => Math.abs(v * scale - at) < clearance)) continue;
+                const f = (at - s0) / (s1 - s0);
+                marks.push({ position: fromWorld(xy[a][0] + f * dx, xy[a][1] + f * dy), angle });
+            }
         }
     }
     return new IconLayer({
-        id: `${id}-chevrons`,
+        id,
         data: marks,
         iconAtlas: getChevronAtlas(),
         iconMapping: CHEVRON_MAPPING,
@@ -445,11 +465,15 @@ function EpecDeckMap({
     };
 
     const zoomRef = useRef(initialViewState.zoom);
+    const viewRef = useRef(initialViewState);
+    const viewVersion = useRef(0);
+    const containerRef = useRef(null);
     const viewKeyRef = useRef(null);
     const viewKey = JSON.stringify(initialViewState);
     if (viewKeyRef.current !== viewKey) {
         viewKeyRef.current = viewKey;
         zoomRef.current = initialViewState.zoom;
+        viewRef.current = initialViewState;
     }
     const gateKey = zoomGateKey(layers, zoomRef.current);
     const layersRef = useRef(layers);
@@ -457,11 +481,11 @@ function EpecDeckMap({
     layersRef.current = layers;
     gateKeyRef.current = gateKey;
     const [, forceRender] = useReducer(n => n + 1, 0);
-    const [zoomKey, setZoomKey] = useState(() => Math.round(initialViewState.zoom * 2) / 2);
 
     const handleViewStateChange = useCallback(({ viewState: vs }) => {
         zoomRef.current = vs.zoom;
-        setZoomKey(Math.round(vs.zoom * 2) / 2);
+        viewRef.current = vs;
+        viewVersion.current += 1;
         if (zoomGateKey(layersRef.current, vs.zoom) !== gateKeyRef.current) {
             forceRender();
         }
@@ -490,10 +514,41 @@ function EpecDeckMap({
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [otherSpecs, gateKey, filter],
     );
-    const chevronLayers = useMemo(
-        () => otherSpecs.map(s => chevronLayer(s, zoomKey)),
-        [otherSpecs, zoomKey],
-    );
+    const chevronSets = useMemo(() => otherSpecs.map(chevronTracks), [otherSpecs]);
+    const [chevronClock, setChevronClock] = useState(0);
+    useEffect(() => {
+        if (!chevronSets.some(Boolean)) return undefined;
+        const moving = chevronSets.some(c => c && c.opts.speed > 0);
+        let rafId = null;
+        let last = 0;
+        let seen = -1;
+        const tick = (ts) => {
+            rafId = requestAnimationFrame(tick);
+            if (ts - last < FRAME_INTERVAL_MS) return;
+            last = ts;
+            if (moving || seen !== viewVersion.current) {
+                seen = viewVersion.current;
+                setChevronClock(ts);
+            }
+        };
+        const start = () => { if (rafId == null) rafId = requestAnimationFrame(tick); };
+        const stop = () => { if (rafId != null) cancelAnimationFrame(rafId); rafId = null; };
+        const onVisibility = () => (document.hidden ? stop() : start());
+        document.addEventListener('visibilitychange', onVisibility);
+        if (!document.hidden) start();
+        return () => {
+            document.removeEventListener('visibilitychange', onVisibility);
+            stop();
+        };
+    }, [chevronSets]);
+    const chevronLayers = useMemo(() => {
+        const { longitude, latitude, zoom } = viewRef.current;
+        const el = containerRef.current;
+        const r = Math.hypot(el ? el.clientWidth : 2000, el ? el.clientHeight : 2000) / 2 / 2 ** zoom;
+        const [cx, cy] = toWorld([longitude, latitude]);
+        const view = [cx - r, cy - r, cx + r, cy + r];
+        return chevronSets.map(c => c && chevronLayer(c, zoom, view, chevronClock / 1000 * c.opts.speed));
+    }, [chevronSets, chevronClock]);
 
     // A single shared cycle length for all pulses: the max loopLength across
     // trips specs (falling back to the default). currentTime sweeps 0..loopLength.
@@ -632,6 +687,7 @@ function EpecDeckMap({
     return (
         <div
             id={id}
+            ref={containerRef}
             style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
         >
             {interleaved ? (
