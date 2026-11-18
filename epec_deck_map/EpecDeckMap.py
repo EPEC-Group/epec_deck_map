@@ -19,9 +19,8 @@ class EpecDeckMap(Component):
         Layer spec dicts.  Each dict must have ``_type`` (the deck.gl class
         name), ``_accessors`` (mapping camelCase prop → snake_case data key),
         and any additional static props understood by that layer class.
-        Optional ``minZoom`` (inclusive) / ``maxZoom`` (exclusive) show the
-        layer only within that zoom range, toggled client-side as the user
-        zooms; they are not passed to deck.gl.
+        Optional ``minZoom`` (inclusive) / ``maxZoom`` (exclusive) limit the
+        layer to a zoom range.
     viewState : dict
         Initial camera ``{latitude, longitude, zoom, pitch}``.  Used once on
         mount; user pan/zoom is managed internally by deck.gl.

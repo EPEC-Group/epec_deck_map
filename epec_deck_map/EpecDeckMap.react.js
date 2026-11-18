@@ -47,8 +47,8 @@ const DEFAULT_TRAIL_LENGTH = 0.3;
  *     pickable: true,
  *     getTextAnchor: "middle",   // constant string, NOT a data accessor
  *     characterSet: [...],       // no @@= corruption possible here
- *     minZoom: 7,                // optional: hidden below zoom 7 (inclusive bound)
- *     maxZoom: 10,               // optional: hidden from zoom 10 up (exclusive bound)
+ *     minZoom: 7,
+ *     maxZoom: 10,
  *     ...
  *   }
  *
@@ -58,13 +58,11 @@ const DEFAULT_TRAIL_LENGTH = 0.3;
  * Workaround #3 retired: clickInfo.object is the exact data-row dict; keys are always
  *   whatever Python put in the data list (snake_case). No camelCase conversion happens.
  */
-/** Whether a spec's optional minZoom (inclusive) / maxZoom (exclusive) admit `zoom`. */
 function inZoomRange(spec, zoom) {
     return (spec.minZoom == null || zoom >= spec.minZoom)
         && (spec.maxZoom == null || zoom < spec.maxZoom);
 }
 
-/** One character per zoom-gated spec; changes only when a gate's visibility flips. */
 function zoomGateKey(specs, zoom) {
     let key = '';
     for (const s of (specs || [])) {
@@ -76,8 +74,6 @@ function zoomGateKey(specs, zoom) {
 }
 
 function buildLayer(spec, zoom, currentTime) {
-    // `loopLength`, `minZoom` and `maxZoom` are read by the parent component;
-    // strip them so they are never passed as unknown deck.gl props.
     const { _type, _accessors = {}, loopLength, minZoom, maxZoom, ...rest } = spec;
     const LayerClass = LAYER_MAP[_type];
     if (!LayerClass) {
@@ -87,7 +83,6 @@ function buildLayer(spec, zoom, currentTime) {
 
     // Start with all static props (data, id, widthScale, characterSet, …)
     const props = { ...rest };
-    // Toggling `visible` keeps the layer's GPU buffers, unlike dropping it.
     props.visible = rest.visible !== false && inZoomRange(spec, zoom);
 
     // TripsLayer is the only animated layer: inject the per-frame currentTime and
@@ -127,10 +122,6 @@ function EpecDeckMap({
         pitch: 0,
     };
 
-    // The camera stays uncontrolled; the live zoom lives in a ref and a
-    // re-render is forced only when a zoom gate flips, never per pan frame.
-    // deck.gl resets the camera when initialViewState changes by value, so
-    // the ref follows the same comparison.
     const zoomRef = useRef(initialViewState.zoom);
     const viewKeyRef = useRef(null);
     const viewKey = JSON.stringify(initialViewState);
@@ -304,11 +295,7 @@ function EpecDeckMap({
 EpecDeckMap.propTypes = {
     /** Dash component id */
     id: PropTypes.string,
-    /**
-     * List of layer spec dicts (see buildLayer above for format). A spec may
-     * set `minZoom` (inclusive) / `maxZoom` (exclusive) to show the layer only
-     * within that zoom range, evaluated client-side.
-     */
+    /** List of layer spec dicts (see buildLayer above for format) */
     layers: PropTypes.array,
     /** Initial camera position {latitude, longitude, zoom, pitch} */
     viewState: PropTypes.object,

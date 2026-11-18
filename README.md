@@ -62,7 +62,7 @@ See the docstring in [epec_deck_map/EpecDeckMap.py](epec_deck_map/EpecDeckMap.py
 
 | Prop | Type | Description |
 |---|---|---|
-| `layers` | list | Layer-spec dicts. Each must have `_type` (deck.gl class name) and `_accessors` (camelCase prop → snake_case data key). Optional `minZoom` (inclusive) / `maxZoom` (exclusive) show a layer only within that zoom range, client-side. |
+| `layers` | list | Layer-spec dicts. Each must have `_type` (deck.gl class name) and `_accessors` (camelCase prop → snake_case data key). Optional `minZoom` / `maxZoom` limit a layer to a zoom range. |
 | `viewState` | dict | Initial camera `{latitude, longitude, zoom, pitch}`. Managed internally after mount. |
 | `mapStyle` | str | Basemap tile URL (Carto GL JSON style or Mapbox URL). |
 | `pickingRadius` | int | Hit-test radius in pixels (default 5). |
