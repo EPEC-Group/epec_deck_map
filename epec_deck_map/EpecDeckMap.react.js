@@ -31,7 +31,7 @@ const CYCLE_DURATION_MS = 4000;        // one full 0..loopLength cycle every 4s
 const DEFAULT_LOOP_LENGTH = 1.0;
 const DEFAULT_TRAIL_LENGTH = 0.3;
 
-const DEFAULT_CHEVRONS = { interval: 80, size: 6, color: [255, 255, 255, 255], clearance: 8, maxTurn: 35, speed: 0 };
+const DEFAULT_CHEVRONS = { interval: 80, size: 6, color: [255, 255, 255, 255], clearance: 8, maxTurn: 35, speed: 0, merge: 0 };
 const CHEVRON_ICON_PX = 64;
 const CHEVRON_MAPPING = {
     chevron: { x: 0, y: 0, width: CHEVRON_ICON_PX, height: CHEVRON_ICON_PX, anchorX: 32, anchorY: 32, mask: true },
@@ -102,20 +102,81 @@ function chevronTracks(spec) {
             box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)],
         });
     }
+    rows.sort((p, q) => q.cum[q.cum.length - 1] - p.cum[p.cum.length - 1]);
     return { id: `${id}-chevrons`, spec, opts, rows };
+}
+
+/** Screen-px grid of in-view segments, sampled every merge / 2 px; cells 2 * merge px. */
+function mergeGrid(rows, view, scale, merge) {
+    const cells = Object.create(null);
+    const cell = 2 * merge;
+    rows.forEach(({ xy, box }, i) => {
+        if (outside(box, view)) return;
+        for (let b = 1; b < xy.length; b++) {
+            const a = b - 1;
+            const seg = [
+                Math.min(xy[a][0], xy[b][0]), Math.min(xy[a][1], xy[b][1]),
+                Math.max(xy[a][0], xy[b][0]), Math.max(xy[a][1], xy[b][1]),
+            ];
+            if (outside(seg, view)) continue;
+            const x0 = xy[a][0] * scale;
+            const y0 = xy[a][1] * scale;
+            const dx = xy[b][0] * scale - x0;
+            const dy = xy[b][1] * scale - y0;
+            const n = Math.ceil(Math.hypot(dx, dy) / (merge / 2));
+            let last = null;
+            for (let k = 0; k <= n; k++) {
+                const key = `${Math.floor((x0 + dx * k / n) / cell)},${Math.floor((y0 + dy * k / n) / cell)}`;
+                if (key === last) continue;
+                last = key;
+                (cells[key] || (cells[key] = [])).push(i, a);
+            }
+        }
+    });
+    return cells;
+}
+
+/** True when a row before `i` runs within `merge` px of (px, py) heading the same way. */
+function covered(cells, rows, i, px, py, hx, hy, scale, merge) {
+    const cell = 2 * merge;
+    const cx = Math.floor(px / cell);
+    const cy = Math.floor(py / cell);
+    for (let ox = -1; ox <= 1; ox++) {
+        for (let oy = -1; oy <= 1; oy++) {
+            const list = cells[`${cx + ox},${cy + oy}`];
+            if (!list) continue;
+            for (let k = 0; k < list.length; k += 2) {
+                const j = list[k];
+                if (j >= i) continue;
+                const { xy, dir } = rows[j];
+                const a = list[k + 1];
+                const ax = xy[a][0] * scale;
+                const ay = xy[a][1] * scale;
+                const sx = xy[a + 1][0] * scale - ax;
+                const sy = xy[a + 1][1] * scale - ay;
+                const len2 = sx * sx + sy * sy;
+                if (!(len2 > 0)) continue;
+                const t = Math.max(0, Math.min(1, ((px - ax) * sx + (py - ay) * sy) / len2));
+                if (Math.hypot(ax + t * sx - px, ay + t * sy - py) >= merge) continue;
+                if ((dir * (sx * hx + sy * hy)) / Math.sqrt(len2) > 0.7) return true;
+            }
+        }
+    }
+    return false;
 }
 
 const outside = (box, v) => box[2] < v[0] || box[0] > v[2] || box[3] < v[1] || box[1] > v[3];
 
 /** Chevrons inside world rect `view`, every `interval` px, shifted `travel` px along the flow. */
 function chevronLayer({ id, spec, opts, rows }, zoom, view, travel) {
-    const { interval, size, color, clearance } = opts;
+    const { interval, size, color, clearance, merge } = opts;
     const scale = 2 ** zoom;
+    const cells = merge > 0 ? mergeGrid(rows, view, scale, merge) : null;
     const marks = [];
-    for (const { xy, cum, sharp, dir, box } of rows) {
-        if (outside(box, view)) continue;
+    rows.forEach(({ xy, cum, sharp, dir, box }, i) => {
+        if (outside(box, view)) return;
         const length = cum[cum.length - 1] * scale;
-        if (length < 2 * size) continue;
+        if (length < 2 * size) return;
         const base = ((((length % interval) / 2 + dir * travel) % interval) + interval) % interval;
         for (let b = 1; b < xy.length; b++) {
             const a = b - 1;
@@ -129,13 +190,18 @@ function chevronLayer({ id, spec, opts, rows }, zoom, view, travel) {
             const dx = xy[b][0] - xy[a][0];
             const dy = xy[b][1] - xy[a][1];
             const angle = Math.atan2(dir * dy, dir * dx) * 180 / Math.PI;
+            const hx = dir * dx * scale / (s1 - s0);
+            const hy = dir * dy * scale / (s1 - s0);
             for (let at = base + Math.ceil((s0 - base) / interval) * interval; at < s1; at += interval) {
                 if (sharp.some(v => Math.abs(v * scale - at) < clearance)) continue;
                 const f = (at - s0) / (s1 - s0);
-                marks.push({ position: fromWorld(xy[a][0] + f * dx, xy[a][1] + f * dy), angle });
+                const wx = xy[a][0] + f * dx;
+                const wy = xy[a][1] + f * dy;
+                if (cells && covered(cells, rows, i, wx * scale, wy * scale, hx, hy, scale, merge)) continue;
+                marks.push({ position: fromWorld(wx, wy), angle });
             }
         }
-    }
+    });
     return new IconLayer({
         id,
         data: marks,
