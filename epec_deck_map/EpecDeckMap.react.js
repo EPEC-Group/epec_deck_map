@@ -96,9 +96,12 @@ function buildLayer(spec, zoom, currentTime) {
 
     // Convert each _accessors entry into a real accessor function.
     // e.g. { "getPath": "path" } → getPath: d => d["path"]
+    const updateTriggers = { ...rest.updateTriggers };
     for (const [propName, dataKey] of Object.entries(_accessors)) {
         props[propName] = (d) => d[dataKey];
+        updateTriggers[propName] = dataKey;
     }
+    props.updateTriggers = updateTriggers;
 
     return new LayerClass(props);
 }

@@ -56,6 +56,18 @@ if __name__ == "__main__":
     app.run(debug=True)
 ```
 
+### Updating one layer
+
+```python
+from dash import Patch
+
+@app.callback(Output("map", "layers"), Input("interval-slider", "value"))
+def recolour_lines(t):
+    p = Patch()
+    p[0]["data"] = line_rows_at(t)
+    return p
+```
+
 ### Prop reference
 
 See the docstring in [epec_deck_map/EpecDeckMap.py](epec_deck_map/EpecDeckMap.py) for full semantics. Key props:
