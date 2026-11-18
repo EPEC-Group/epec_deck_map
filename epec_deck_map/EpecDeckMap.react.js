@@ -29,6 +29,121 @@ const CYCLE_DURATION_MS = 4000;        // one full 0..loopLength cycle every 4s
 const DEFAULT_LOOP_LENGTH = 1.0;
 const DEFAULT_TRAIL_LENGTH = 0.3;
 
+const DTYPES = {
+    int8: Int8Array,
+    uint8: Uint8Array,
+    int16: Int16Array,
+    uint16: Uint16Array,
+    int32: Int32Array,
+    uint32: Uint32Array,
+    float32: Float32Array,
+    float64: Float64Array,
+};
+
+function decodeArray(enc, name) {
+    const ArrayType = enc && DTYPES[enc.dtype];
+    if (!ArrayType || typeof enc.base64 !== 'string') {
+        throw new Error(`${name}: expected {dtype, base64} with dtype in ${Object.keys(DTYPES)}`);
+    }
+    const raw = atob(enc.base64);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    if (bytes.byteLength % ArrayType.BYTES_PER_ELEMENT) {
+        throw new Error(`${name}: ${bytes.byteLength} bytes is not a whole number of ${enc.dtype}`);
+    }
+    return new ArrayType(bytes.buffer);
+}
+
+function perVertex(value, size, starts, vertexCount) {
+    const out = new value.constructor(vertexCount * size);
+    for (let i = 0; i < starts.length; i++) {
+        const end = i + 1 < starts.length ? starts[i + 1] : vertexCount;
+        for (let v = starts[i]; v < end; v++) {
+            out.set(value.subarray(i * size, (i + 1) * size), v * size);
+        }
+    }
+    return out;
+}
+
+function decodeBinaryData(data) {
+    const { length } = data;
+    if (!Number.isInteger(length) || length < 0) {
+        throw new Error(`length must be a non-negative integer, got ${length}`);
+    }
+    const counts = {};
+    const attributes = {};
+    for (const [name, attr] of Object.entries(data.attributes)) {
+        const { size } = attr || {};
+        if (!Number.isInteger(size) || size < 1) {
+            throw new Error(`${name}: size must be a positive integer, got ${size}`);
+        }
+        const value = decodeArray(attr.value, name);
+        if (value.length % size) {
+            throw new Error(`${name}: ${value.length} values is not a multiple of size ${size}`);
+        }
+        counts[name] = value.length / size;
+        attributes[name] = { value, size };
+        if (attr.normalized != null) attributes[name].normalized = Boolean(attr.normalized);
+    }
+
+    if (data.startIndices == null) {
+        for (const [name, count] of Object.entries(counts)) {
+            if (count !== length) {
+                throw new Error(`${name}: ${count} values for ${length} objects`);
+            }
+        }
+        return { length, attributes };
+    }
+
+    const startIndices = decodeArray(data.startIndices, 'startIndices');
+    if (!(startIndices instanceof Uint32Array || startIndices instanceof Int32Array)) {
+        throw new Error('startIndices: dtype must be uint32 or int32');
+    }
+    if (!attributes.getPath) {
+        throw new Error('startIndices requires a getPath attribute');
+    }
+    const vertexCount = counts.getPath;
+    if (startIndices.length !== length) {
+        throw new Error(`startIndices: ${startIndices.length} entries for ${length} objects`);
+    }
+    for (let i = 0; i < length; i++) {
+        const next = i + 1 < length ? startIndices[i + 1] : vertexCount;
+        if ((i === 0 && startIndices[0] !== 0) || startIndices[i] > next) {
+            throw new Error('startIndices must start at 0 and ascend to the vertex count');
+        }
+    }
+    for (const [name, count] of Object.entries(counts)) {
+        if (count === vertexCount) continue;
+        if (count !== length) {
+            throw new Error(`${name}: ${count} values for ${length} paths / ${vertexCount} vertices`);
+        }
+        const attr = attributes[name];
+        attr.value = perVertex(attr.value, attr.size, startIndices, vertexCount);
+    }
+    return { length, startIndices, attributes };
+}
+
+const decodedCache = new WeakMap();
+
+function binaryData(data, layerId) {
+    if (!decodedCache.has(data)) {
+        let decoded = null;
+        try {
+            decoded = decodeBinaryData(data);
+        } catch (err) {
+            console.error(`EpecDeckMap: layer "${layerId}" binary data rejected: ${err.message}`);
+        }
+        decodedCache.set(data, decoded);
+    }
+    return decodedCache.get(data);
+}
+
+function pickedObject({ object, index, layer }) {
+    if (object) return object;
+    const objects = layer && layer.props._objects;
+    return (objects && index >= 0 && objects[index]) || null;
+}
+
 /**
  * Convert a layer spec dict (from Python) into a real deck.gl Layer instance.
  *
@@ -36,7 +151,8 @@ const DEFAULT_TRAIL_LENGTH = 0.3;
  *   {
  *     _type:     "PathLayer" | "ScatterplotLayer" | "TextLayer",
  *     id:        string,
- *     data:      [...],          // list of data-row dicts
+ *     data:      [...],          // rows, or epec_deck_map.binary_data
+ *     _objects:  [...],          // binary only: rows for tooltip / clickInfo
  *     _accessors: {              // camelCase prop name → snake_case data key
  *       "getPath": "path",
  *       "getFillColor": "fill_color",
@@ -68,6 +184,11 @@ function buildLayer(spec, currentTime) {
 
     // Start with all static props (data, id, widthScale, characterSet, …)
     const props = { ...rest };
+
+    if (props.data && props.data.attributes && !Array.isArray(props.data)) {
+        props.data = binaryData(props.data, spec.id);
+        if (!props.data) return null;
+    }
 
     // TripsLayer is the only animated layer: inject the per-frame currentTime and
     // fall back to a sane trailLength if Python did not supply one.
@@ -200,11 +321,14 @@ function EpecDeckMap({
     //   handles the picking catchment radius.
     const handleClick = useCallback(
         (info) => {
-            if (!info || !info.object) return;
+            if (!info) return;
+            const object = pickedObject(info);
+            if (!object && !(info.index >= 0)) return;
             setProps &&
                 setProps({
                     clickInfo: {
-                        object: info.object,            // exact data-row dict from Python
+                        object,
+                        index: info.index,
                         coordinate: info.coordinate,    // [lon, lat]
                         layerId: info.layer ? info.layer.id : null,
                     },
@@ -217,7 +341,8 @@ function EpecDeckMap({
     // each data row already carries pre-rendered HTML in its `tooltip` field).
     const tooltipStyle = tooltip && tooltip.style ? tooltip.style : {};
     const getTooltip = useCallback(
-        ({ object }) => {
+        (info) => {
+            const object = pickedObject(info);
             if (!object || !object.tooltip) return null;
             return { html: object.tooltip, style: tooltipStyle };
         },
@@ -270,7 +395,8 @@ EpecDeckMap.propTypes = {
     tooltip: PropTypes.object,
     /**
      * Output-only prop. Set by the component when the user clicks a pickable
-     * feature: { object: <data row dict>, coordinate: [lon, lat], layerId: string }
+     * feature: { object: <data row dict or null>, index: number, coordinate: [lon, lat],
+     * layerId: string }
      */
     clickInfo: PropTypes.object,
     /** Injected by Dash to propagate prop updates back to Python */

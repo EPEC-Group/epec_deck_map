@@ -56,6 +56,27 @@ if __name__ == "__main__":
     app.run(debug=True)
 ```
 
+### Binary layer data
+
+`binary_data` packs columns, named by deck.gl accessor, into typed arrays. `_objects` supplies rows for tooltips and `clickInfo`.
+
+```python
+from epec_deck_map import binary_data
+
+lines = {
+    "_type": "PathLayer",
+    "id": "lines",
+    "data": binary_data({
+        "getPath": [line.coords for line in lines_in],
+        "getColor": [line.rgba for line in lines_in],
+        "getWidth": [line.width for line in lines_in],
+    }),
+    "_objects": [{"name": line.name, "tooltip": line.html} for line in lines_in],
+    "pickable": True,
+    "widthUnits": "pixels",
+}
+```
+
 ### Prop reference
 
 See the docstring in [epec_deck_map/EpecDeckMap.py](epec_deck_map/EpecDeckMap.py) for full semantics. Key props:
@@ -67,7 +88,7 @@ See the docstring in [epec_deck_map/EpecDeckMap.py](epec_deck_map/EpecDeckMap.py
 | `mapStyle` | str | Basemap tile URL (Carto GL JSON style or Mapbox URL). |
 | `pickingRadius` | int | Hit-test radius in pixels (default 5). |
 | `tooltip` | dict | `{"style": {...}}` applied to the tooltip container. Each data row supplies its own HTML in its `tooltip` field. |
-| `clickInfo` | dict | Output-only. Set on click: `{"object": <row>, "coordinate": [lon, lat], "layerId": str}`. |
+| `clickInfo` | dict | Output-only. Set on click: `{"object": <row>, "index": int, "coordinate": [lon, lat], "layerId": str}`. |
 
 ## Rebuilding the bundle
 

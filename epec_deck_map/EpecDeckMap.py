@@ -19,6 +19,8 @@ class EpecDeckMap(Component):
         Layer spec dicts.  Each dict must have ``_type`` (the deck.gl class
         name), ``_accessors`` (mapping camelCase prop → snake_case data key),
         and any additional static props understood by that layer class.
+        ``data`` may come from ``binary_data``, with ``_objects`` rows for
+        tooltips and ``clickInfo``.
     viewState : dict
         Initial camera ``{latitude, longitude, zoom, pitch}``.  Used once on
         mount; user pan/zoom is managed internally by deck.gl.
@@ -33,7 +35,8 @@ class EpecDeckMap(Component):
         pre-rendered HTML in its ``tooltip`` field.
     clickInfo : dict
         Output-only.  Set when user clicks a pickable feature:
-        ``{"object": <data row>, "coordinate": [lon, lat], "layerId": str}``.
+        ``{"object": <data row>, "index": int, "coordinate": [lon, lat],
+        "layerId": str}``.
     """
 
     _prop_names = [
