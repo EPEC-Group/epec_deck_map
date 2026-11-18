@@ -119,7 +119,9 @@ PathLayer: chevrons every `interval` px, pointing along the vertex order where `
 ```python
 {"_accessors": {"getPath": "path", "getDirection": "dir"},
  "chevrons": {"interval": 80, "size": 6, "color": [255, 255, 255, 255],
-              "clearance": 8, "maxTurn": 35}}  # px; skip within clearance of bends sharper than maxTurn degrees
+              "clearance": 10, "maxTurn": 150, "merge": 10}}
+# chevrons turn through bends over clearance px either side, hide at bends past maxTurn degrees,
+# and hide where a longer line runs within merge px the same way
 ```
 
 ### Constant-speed pulses

@@ -31,7 +31,7 @@ const CYCLE_DURATION_MS = 4000;        // one full 0..loopLength cycle every 4s
 const DEFAULT_LOOP_LENGTH = 1.0;
 const DEFAULT_TRAIL_LENGTH = 0.3;
 
-const DEFAULT_CHEVRONS = { interval: 80, size: 6, color: [255, 255, 255, 255], clearance: 8, maxTurn: 35, speed: 0, merge: 0 };
+const DEFAULT_CHEVRONS = { interval: 80, size: 6, color: [255, 255, 255, 255], clearance: 10, maxTurn: 150, speed: 0, merge: 0 };
 const CHEVRON_ICON_PX = 64;
 const CHEVRON_MAPPING = {
     chevron: { x: 0, y: 0, width: CHEVRON_ICON_PX, height: CHEVRON_ICON_PX, anchorX: 32, anchorY: 32, mask: true },
@@ -75,7 +75,6 @@ function chevronTracks(spec) {
     const { getPath, getDirection } = _accessors;
     if (!chevrons || !data || !getPath || !getDirection) return null;
     const opts = { ...DEFAULT_CHEVRONS, ...chevrons };
-    const cosMax = Math.cos(opts.maxTurn * Math.PI / 180);
     const rows = [];
     for (const row of data) {
         const dir = Number(row[getDirection]);
@@ -86,19 +85,18 @@ function chevronTracks(spec) {
         for (let i = 1; i < xy.length; i++) {
             cum.push(cum[i - 1] + Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]));
         }
-        const sharp = [];
-        for (let i = 1; i < xy.length - 1; i++) {
-            const ax = xy[i][0] - xy[i - 1][0];
-            const ay = xy[i][1] - xy[i - 1][1];
-            const bx = xy[i + 1][0] - xy[i][0];
-            const by = xy[i + 1][1] - xy[i][1];
-            const d = Math.hypot(ax, ay) * Math.hypot(bx, by);
-            if (d > 0 && (ax * bx + ay * by) / d < cosMax) sharp.push(cum[i]);
-        }
+        const turn = xy.map((p, i) => {
+            if (i === 0 || i === xy.length - 1) return 0;
+            const ax = p[0] - xy[i - 1][0];
+            const ay = p[1] - xy[i - 1][1];
+            const bx = xy[i + 1][0] - p[0];
+            const by = xy[i + 1][1] - p[1];
+            return Math.atan2(ax * by - ay * bx, ax * bx + ay * by) * 180 / Math.PI;
+        });
         const xs = xy.map(p => p[0]);
         const ys = xy.map(p => p[1]);
         rows.push({
-            xy, cum, sharp, dir,
+            xy, cum, turn, dir,
             box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)],
         });
     }
@@ -165,15 +163,29 @@ function covered(cells, rows, i, px, py, hx, hy, scale, merge) {
     return false;
 }
 
+/** Rotation easing the heading through bends within `clearance` px of `at`, or null past `maxTurn`. */
+function bendRotation({ cum, turn }, a, at, scale, { clearance, maxTurn }) {
+    let rot = 0;
+    const ease = (k) => {
+        if (Math.abs(turn[k]) > maxTurn) return false;
+        rot += turn[k] * ((at - cum[k] * scale) / (2 * clearance) + 0.5 - (k <= a ? 1 : 0));
+        return true;
+    };
+    for (let k = a; k > 0 && at - cum[k] * scale < clearance; k--) if (!ease(k)) return null;
+    for (let k = a + 1; k < turn.length - 1 && cum[k] * scale - at < clearance; k++) if (!ease(k)) return null;
+    return rot;
+}
+
 const outside = (box, v) => box[2] < v[0] || box[0] > v[2] || box[3] < v[1] || box[1] > v[3];
 
 /** Chevrons inside world rect `view`, every `interval` px, shifted `travel` px along the flow. */
 function chevronLayer({ id, spec, opts, rows }, zoom, view, travel) {
-    const { interval, size, color, clearance, merge } = opts;
+    const { interval, size, color, merge } = opts;
     const scale = 2 ** zoom;
     const cells = merge > 0 ? mergeGrid(rows, view, scale, merge) : null;
     const marks = [];
-    rows.forEach(({ xy, cum, sharp, dir, box }, i) => {
+    rows.forEach((row, i) => {
+        const { xy, cum, dir, box } = row;
         if (outside(box, view)) return;
         const length = cum[cum.length - 1] * scale;
         if (length < 2 * size) return;
@@ -193,12 +205,13 @@ function chevronLayer({ id, spec, opts, rows }, zoom, view, travel) {
             const hx = dir * dx * scale / (s1 - s0);
             const hy = dir * dy * scale / (s1 - s0);
             for (let at = base + Math.ceil((s0 - base) / interval) * interval; at < s1; at += interval) {
-                if (sharp.some(v => Math.abs(v * scale - at) < clearance)) continue;
+                const rot = bendRotation(row, a, at, scale, opts);
+                if (rot === null) continue;
                 const f = (at - s0) / (s1 - s0);
                 const wx = xy[a][0] + f * dx;
                 const wy = xy[a][1] + f * dy;
                 if (cells && covered(cells, rows, i, wx * scale, wy * scale, hx, hy, scale, merge)) continue;
-                marks.push({ position: fromWorld(wx, wy), angle });
+                marks.push({ position: fromWorld(wx, wy), angle: angle + rot });
             }
         }
     });
