@@ -19,11 +19,19 @@ class EpecDeckMap(Component):
         Layer spec dicts.  Each dict must have ``_type`` (the deck.gl class
         name), ``_accessors`` (mapping camelCase prop → snake_case data key),
         and any additional static props understood by that layer class.
+        Optional ``minZoom`` (inclusive) / ``maxZoom`` (exclusive) limit the
+        layer to a zoom range.
     viewState : dict
         Initial camera ``{latitude, longitude, zoom, pitch}``.  Used once on
         mount; user pan/zoom is managed internally by deck.gl.
-    mapStyle : str
-        Basemap tile URL (Carto GL JSON style or Mapbox URL).
+    mapStyle : str | dict
+        MapLibre style URL or style JSON dict.
+    mapSources : dict
+        Extra MapLibre sources, ``{source_id: source_json}``.
+    mapLayers : list
+        Extra MapLibre layer dicts; optional ``beforeId``.
+    interleaved : bool
+        Render deck.gl inside MapLibre, so a layer spec's ``beforeId`` works.
     pickingRadius : int
         Picking radius in pixels (default 5).  Replaces the fat invisible
         PathLayer workaround from dash-deck.
@@ -47,6 +55,9 @@ class EpecDeckMap(Component):
         'layers',
         'viewState',
         'mapStyle',
+        'mapSources',
+        'mapLayers',
+        'interleaved',
         'pickingRadius',
         'tooltip',
         'clickInfo',
@@ -75,6 +86,9 @@ class EpecDeckMap(Component):
         layers=Component.UNDEFINED,
         viewState=Component.UNDEFINED,
         mapStyle=Component.UNDEFINED,
+        mapSources=Component.UNDEFINED,
+        mapLayers=Component.UNDEFINED,
+        interleaved=Component.UNDEFINED,
         pickingRadius=Component.UNDEFINED,
         tooltip=Component.UNDEFINED,
         clickInfo=Component.UNDEFINED,

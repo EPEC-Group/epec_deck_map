@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import DeckGL from '@deck.gl/react';
 import { DataFilterExtension } from '@deck.gl/extensions';
 import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { TripsLayer } from '@deck.gl/geo-layers';
-import { Map } from 'react-map-gl/maplibre';
+import { MapboxOverlay } from '@deck.gl/mapbox';
+import { Map, useControl, useMap } from 'react-map-gl/maplibre';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -52,6 +53,8 @@ const ECHO_MS = 5000;
  *     pickable: true,
  *     getTextAnchor: "middle",   // constant string, NOT a data accessor
  *     characterSet: [...],       // no @@= corruption possible here
+ *     minZoom: 7,
+ *     maxZoom: 10,
  *     ...
  *   }
  *
@@ -61,10 +64,23 @@ const ECHO_MS = 5000;
  * Workaround #3 retired: clickInfo.object is the exact data-row dict; keys are always
  *   whatever Python put in the data list (snake_case). No camelCase conversion happens.
  */
-function buildLayer(spec, currentTime, filter) {
-    // `loopLength` is an animation control read by the parent component (see the
-    // rAF loop below); strip it so it is never passed as an unknown deck.gl prop.
-    const { _type, _accessors = {}, loopLength, ...rest } = spec;
+function inZoomRange(spec, zoom) {
+    return (spec.minZoom == null || zoom >= spec.minZoom)
+        && (spec.maxZoom == null || zoom < spec.maxZoom);
+}
+
+function zoomGateKey(specs, zoom) {
+    let key = '';
+    for (const s of (specs || [])) {
+        if (s && (s.minZoom != null || s.maxZoom != null)) {
+            key += inZoomRange(s, zoom) ? '1' : '0';
+        }
+    }
+    return key;
+}
+
+function buildLayer(spec, zoom, currentTime, filter) {
+    const { _type, _accessors = {}, loopLength, minZoom, maxZoom, ...rest } = spec;
     const LayerClass = LAYER_MAP[_type];
     if (!LayerClass) {
         console.warn(`EpecDeckMap: unknown layer type "${_type}" — skipping`);
@@ -73,6 +89,7 @@ function buildLayer(spec, currentTime, filter) {
 
     // Start with all static props (data, id, widthScale, characterSet, …)
     const props = { ...rest };
+    props.visible = rest.visible !== false && inZoomRange(spec, zoom);
 
     // TripsLayer is the only animated layer: inject the per-frame currentTime and
     // fall back to a sane trailLength if Python did not supply one.
@@ -85,9 +102,12 @@ function buildLayer(spec, currentTime, filter) {
 
     // Convert each _accessors entry into a real accessor function.
     // e.g. { "getPath": "path" } → getPath: d => d["path"]
+    const updateTriggers = { ...rest.updateTriggers };
     for (const [propName, dataKey] of Object.entries(_accessors)) {
         props[propName] = (d) => d[dataKey];
+        updateTriggers[propName] = dataKey;
     }
+    props.updateTriggers = updateTriggers;
 
     // float32 attribute, so times are relative to the domain start.
     if (_accessors.getFilterValue) {
@@ -216,6 +236,60 @@ function useTimeFilter(timeFilter, setProps) {
     }, [tf != null, shown, t0, win]);
 }
 
+const isPlainObject = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
+
+function BasemapOverlays({ sources, layers }) {
+    const { current } = useMap();
+    useEffect(() => {
+        const map = current && current.getMap();
+        if (!map) return undefined;
+        const addedSources = new Set();
+        const addedLayers = new Set();
+        const failed = new Set();
+        const add = (key, exists, fn) => {
+            if (failed.has(key) || exists()) return false;
+            try {
+                fn();
+            } catch (err) {
+                console.warn(`EpecDeckMap: ${key}: ${err.message}`);
+            }
+            if (exists()) return true;
+            failed.add(key);
+            return false;
+        };
+        const apply = () => {
+            // style.loaded() also waits on tiles.
+            if (!map.style || !map.style._loaded) return;
+            for (const [sid, spec] of Object.entries(sources)) {
+                if (add(`source ${sid}`, () => map.getSource(sid), () => map.addSource(sid, spec))) {
+                    addedSources.add(sid);
+                }
+            }
+            for (const { beforeId, ...layer } of layers) {
+                const before = beforeId && map.getLayer(beforeId) ? beforeId : undefined;
+                if (add(`layer ${layer.id}`, () => map.getLayer(layer.id), () => map.addLayer(layer, before))) {
+                    addedLayers.add(layer.id);
+                }
+            }
+        };
+        apply();
+        map.on('styledata', apply);
+        return () => {
+            map.off('styledata', apply);
+            if (!map.style) return;
+            for (const lid of addedLayers) if (map.getLayer(lid)) map.removeLayer(lid);
+            for (const sid of addedSources) if (map.getSource(sid)) map.removeSource(sid);
+        };
+    }, [current, sources, layers]);
+    return null;
+}
+
+function DeckOverlay(props) {
+    const overlay = useControl(() => new MapboxOverlay(props));
+    overlay.setProps(props);
+    return null;
+}
+
 // ---------------------------------------------------------------------------
 // EpecDeckMap component
 // ---------------------------------------------------------------------------
@@ -224,11 +298,42 @@ function EpecDeckMap({
     layers,
     viewState,
     mapStyle,
+    mapSources,
+    mapLayers,
+    interleaved,
     pickingRadius,
     tooltip,
     timeFilter,
     setProps,
 }) {
+    const initialViewState = viewState || {
+        latitude: -25.5,
+        longitude: 134.5,
+        zoom: 4,
+        pitch: 0,
+    };
+
+    const zoomRef = useRef(initialViewState.zoom);
+    const viewKeyRef = useRef(null);
+    const viewKey = JSON.stringify(initialViewState);
+    if (viewKeyRef.current !== viewKey) {
+        viewKeyRef.current = viewKey;
+        zoomRef.current = initialViewState.zoom;
+    }
+    const gateKey = zoomGateKey(layers, zoomRef.current);
+    const layersRef = useRef(layers);
+    const gateKeyRef = useRef(gateKey);
+    layersRef.current = layers;
+    gateKeyRef.current = gateKey;
+    const [, forceRender] = useReducer(n => n + 1, 0);
+
+    const handleViewStateChange = useCallback(({ viewState: vs }) => {
+        zoomRef.current = vs.zoom;
+        if (zoomGateKey(layersRef.current, vs.zoom) !== gateKeyRef.current) {
+            forceRender();
+        }
+    }, []);
+
     const filter = useTimeFilter(timeFilter, setProps);
 
     // Split specs into animated (TripsLayer) and everything else. Non-trips
@@ -248,8 +353,9 @@ function EpecDeckMap({
     }, [layers]);
 
     const otherLayers = useMemo(
-        () => otherSpecs.map(s => buildLayer(s, undefined, filter)).filter(Boolean),
-        [otherSpecs, filter],
+        () => otherSpecs.map(s => buildLayer(s, zoomRef.current, undefined, filter)).filter(Boolean),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [otherSpecs, gateKey, filter],
     );
 
     // A single shared cycle length for all pulses: the max loopLength across
@@ -317,8 +423,9 @@ function EpecDeckMap({
     // Trips layers rebuilt each frame with the current time; drawn on top of the
     // static layers. deck.gl diffs efficiently, so only these update per frame.
     const tripsLayers = useMemo(
-        () => tripsSpecs.map(s => buildLayer(s, currentTime, filter)).filter(Boolean),
-        [tripsSpecs, currentTime, filter],
+        () => tripsSpecs.map(s => buildLayer(s, zoomRef.current, currentTime, filter)).filter(Boolean),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [tripsSpecs, currentTime, gateKey, filter],
     );
 
     const deckLayers = useMemo(
@@ -356,29 +463,58 @@ function EpecDeckMap({
         [tooltip],
     );
 
-    const initialViewState = viewState || {
-        latitude: -25.5,
-        longitude: 134.5,
-        zoom: 4,
-        pitch: 0,
-    };
+    const overlaySources = useMemo(
+        () => (isPlainObject(mapSources)
+            ? Object.fromEntries(Object.entries(mapSources).filter(([, s]) => isPlainObject(s)))
+            : {}),
+        [mapSources],
+    );
+    const overlayLayers = useMemo(
+        () => (Array.isArray(mapLayers)
+            ? mapLayers.filter(l => isPlainObject(l) && typeof l.id === 'string')
+            : []),
+        [mapLayers],
+    );
+    const style = isPlainObject(mapStyle) || typeof mapStyle === 'string' ? mapStyle : undefined;
+    const overlays = <BasemapOverlays sources={overlaySources} layers={overlayLayers} />;
+    const radius = pickingRadius != null ? pickingRadius : 5;
 
     return (
         <div
             id={id}
             style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
         >
-            <DeckGL
-                initialViewState={initialViewState}
-                controller={true}
-                layers={deckLayers}
-                pickingRadius={pickingRadius != null ? pickingRadius : 5}
-                onClick={handleClick}
-                getTooltip={getTooltip}
-            >
-                {/* maplibre-gl basemap — no Mapbox token required for Carto tiles */}
-                <Map mapStyle={mapStyle} mapLib={maplibregl} />
-            </DeckGL>
+            {interleaved ? (
+                <Map
+                    initialViewState={initialViewState}
+                    mapStyle={style}
+                    mapLib={maplibregl}
+                    style={{ width: '100%', height: '100%' }}
+                    onMove={handleViewStateChange}
+                >
+                    {overlays}
+                    <DeckOverlay
+                        interleaved
+                        layers={deckLayers}
+                        pickingRadius={radius}
+                        onClick={handleClick}
+                        getTooltip={getTooltip}
+                    />
+                </Map>
+            ) : (
+                <DeckGL
+                    initialViewState={initialViewState}
+                    controller={true}
+                    onViewStateChange={handleViewStateChange}
+                    layers={deckLayers}
+                    pickingRadius={radius}
+                    onClick={handleClick}
+                    getTooltip={getTooltip}
+                >
+                    {/* maplibre-gl basemap — no Mapbox token required for Carto tiles */}
+                    <Map mapStyle={style} mapLib={maplibregl}>{overlays}</Map>
+                </DeckGL>
+            )}
         </div>
     );
 }
@@ -390,8 +526,14 @@ EpecDeckMap.propTypes = {
     layers: PropTypes.array,
     /** Initial camera position {latitude, longitude, zoom, pitch} */
     viewState: PropTypes.object,
-    /** Basemap tile URL (Carto, Mapbox, etc.) */
-    mapStyle: PropTypes.string,
+    /** MapLibre style: a style URL or a full style JSON object */
+    mapStyle: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
+    /** Extra MapLibre sources: {sourceId: source JSON} */
+    mapSources: PropTypes.object,
+    /** Extra MapLibre layer dicts; optional `beforeId` */
+    mapLayers: PropTypes.array,
+    /** Render deck.gl inside MapLibre, so a layer spec's `beforeId` works */
+    interleaved: PropTypes.bool,
     /** Picking radius in pixels — replaces the fat invisible PathLayer workaround */
     pickingRadius: PropTypes.number,
     /**
