@@ -65,9 +65,9 @@ See the docstring in [epec_deck_map/EpecDeckMap.py](epec_deck_map/EpecDeckMap.py
 | `layers` | list | Layer-spec dicts. Each must have `_type` (deck.gl class name) and `_accessors` (camelCase prop → snake_case data key). |
 | `viewState` | dict | Initial camera `{latitude, longitude, zoom, pitch}`. Managed internally after mount. |
 | `mapStyle` | str or dict | MapLibre style URL or full style JSON dict. |
-| `mapSources` | dict | Extra MapLibre sources `{id: source_json}` added on top of the style; survive style changes. |
-| `mapLayers` | list | Extra MapLibre layer dicts, drawn in order; optional `beforeId` inserts beneath a basemap layer. |
-| `interleaved` | bool | Render deck.gl inside MapLibre's GL context so a layer spec's `beforeId` can draw it beneath basemap labels (default False). |
+| `mapSources` | dict | Extra MapLibre sources `{id: source_json}`. |
+| `mapLayers` | list | Extra MapLibre layer dicts; optional `beforeId`. |
+| `interleaved` | bool | Render deck.gl inside MapLibre, so a layer spec's `beforeId` works (default False). |
 | `pickingRadius` | int | Hit-test radius in pixels (default 5). |
 | `tooltip` | dict | `{"style": {...}}` applied to the tooltip container. Each data row supplies its own HTML in its `tooltip` field. |
 | `clickInfo` | dict | Output-only. Set on click: `{"object": <row>, "coordinate": [lon, lat], "layerId": str}`. |

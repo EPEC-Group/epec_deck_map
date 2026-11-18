@@ -90,7 +90,6 @@ function buildLayer(spec, currentTime) {
 
 const isPlainObject = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 
-/** Add MapLibre sources and layers to the basemap, re-adding them after every style load. */
 function BasemapOverlays({ sources, layers }) {
     const { current } = useMap();
     useEffect(() => {
@@ -98,7 +97,6 @@ function BasemapOverlays({ sources, layers }) {
         if (!map) return undefined;
         const addedSources = new Set();
         const addedLayers = new Set();
-        // A rejected spec is not retried on every styledata until the props change.
         const failed = new Set();
         const add = (key, exists, fn) => {
             if (failed.has(key) || exists()) return false;
@@ -112,7 +110,7 @@ function BasemapOverlays({ sources, layers }) {
             return false;
         };
         const apply = () => {
-            // Mirrors react-map-gl's <Source>/<Layer>: style.loaded() also waits on tiles.
+            // style.loaded() also waits on tiles.
             if (!map.style || !map.style._loaded) return;
             for (const [sid, spec] of Object.entries(sources)) {
                 if (add(`source ${sid}`, () => map.getSource(sid), () => map.addSource(sid, spec))) {
@@ -138,7 +136,6 @@ function BasemapOverlays({ sources, layers }) {
     return null;
 }
 
-/** deck.gl rendered inside MapLibre's GL context, so layers can sit beneath basemap labels. */
 function DeckOverlay(props) {
     const overlay = useControl(() => new MapboxOverlay(props));
     overlay.setProps(props);
@@ -293,7 +290,6 @@ function EpecDeckMap({
         pitch: 0,
     };
 
-    // Style JSON only: anything other than plain dicts / lists of dicts is dropped.
     const overlaySources = useMemo(
         () => (isPlainObject(mapSources)
             ? Object.fromEntries(Object.entries(mapSources).filter(([, s]) => isPlainObject(s)))
@@ -357,14 +353,11 @@ EpecDeckMap.propTypes = {
     viewState: PropTypes.object,
     /** MapLibre style: a style URL or a full style JSON object */
     mapStyle: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
-    /** Extra MapLibre sources added to the basemap: {sourceId: source JSON} */
+    /** Extra MapLibre sources: {sourceId: source JSON} */
     mapSources: PropTypes.object,
-    /** Extra MapLibre layer JSON dicts, drawn in order; optional `beforeId` names a basemap layer */
+    /** Extra MapLibre layer dicts; optional `beforeId` */
     mapLayers: PropTypes.array,
-    /**
-     * Render deck.gl inside MapLibre's GL context so a layer spec's `beforeId`
-     * can place it beneath a basemap layer (e.g. labels). Toggling remounts the map.
-     */
+    /** Render deck.gl inside MapLibre, so a layer spec's `beforeId` works */
     interleaved: PropTypes.bool,
     /** Picking radius in pixels — replaces the fat invisible PathLayer workaround */
     pickingRadius: PropTypes.number,

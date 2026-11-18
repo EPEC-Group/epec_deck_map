@@ -23,20 +23,13 @@ class EpecDeckMap(Component):
         Initial camera ``{latitude, longitude, zoom, pitch}``.  Used once on
         mount; user pan/zoom is managed internally by deck.gl.
     mapStyle : str | dict
-        MapLibre style: a style URL (e.g. Carto GL JSON) or a full style JSON
-        dict.
+        MapLibre style URL or style JSON dict.
     mapSources : dict
-        Extra MapLibre sources added on top of the style, ``{source_id:
-        source_json}`` (raster/WMS ``tiles``, vector, ``geojson``, ...).
-        Re-added after every style change.
+        Extra MapLibre sources, ``{source_id: source_json}``.
     mapLayers : list
-        Extra MapLibre layer JSON dicts, drawn in order above the style's
-        layers.  An optional ``beforeId`` names a basemap layer to insert
-        beneath; it is ignored when the style has no such layer.
+        Extra MapLibre layer dicts; optional ``beforeId``.
     interleaved : bool
-        Render deck.gl inside MapLibre's GL context (default False).  A deck
-        layer spec may then carry ``beforeId`` to draw beneath that basemap
-        layer, e.g. below the labels.  Toggling it remounts the map.
+        Render deck.gl inside MapLibre, so a layer spec's ``beforeId`` works.
     pickingRadius : int
         Picking radius in pixels (default 5).  Replaces the fat invisible
         PathLayer workaround from dash-deck.
