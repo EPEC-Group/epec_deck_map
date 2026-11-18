@@ -35,19 +35,11 @@ class EpecDeckMap(Component):
         Output-only.  Set when user clicks a pickable feature:
         ``{"object": <data row>, "coordinate": [lon, lat], "layerId": str}``.
     timeFilter : dict
-        Client-side time window over layers whose ``_accessors`` name a
-        ``getFilterValue`` column (filtered on the GPU, no server call per
-        step): ``{"domain": [t0, t1], "step", "window", "current", "playing",
-        "speed", "loop"}``.  Rows with ``current - window < t <= current`` are
-        drawn; ``window`` defaults to ``step`` (one interval), ``speed`` (time
-        units per second) to one ``step`` a second.  ``current`` is snapped
-        down to the ``t0 + k * step`` grid.  Setting ``current`` seeks; values
-        the component reported in the last 5 s are treated as echoes and
-        ignored, unless ``domain`` changed too.  Playback that reaches ``t1`` without ``loop`` sets
-        ``playing`` false.  Absent: every row is drawn.
+        ``{"domain": [t0, t1], "step", "window", "current", "playing",
+        "speed", "loop"}``.  Shows rows with ``current - window < t <=
+        current`` on layers with a ``getFilterValue`` accessor.
     filterTime : float
-        Output-only.  The playback position, reported at most 4 Hz while
-        playing; seeks made from Python are not reported back.
+        Output-only.  Playback position while playing.
     """
 
     _prop_names = [

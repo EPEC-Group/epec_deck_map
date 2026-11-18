@@ -68,20 +68,13 @@ See the docstring in [epec_deck_map/EpecDeckMap.py](epec_deck_map/EpecDeckMap.py
 | `pickingRadius` | int | Hit-test radius in pixels (default 5). |
 | `tooltip` | dict | `{"style": {...}}` applied to the tooltip container. Each data row supplies its own HTML in its `tooltip` field. |
 | `clickInfo` | dict | Output-only. Set on click: `{"object": <row>, "coordinate": [lon, lat], "layerId": str}`. |
-| `timeFilter` | dict | `{"domain": [t0, t1], "step", "window", "current", "playing", "speed", "loop"}`. Draws only rows of layers with a `getFilterValue` accessor where `current - window < t <= current`. |
-| `filterTime` | float | Output-only. The playback position, reported at most 4 Hz while playing (not for seeks Python made). |
+| `timeFilter` | dict | `{"domain": [t0, t1], "step", "window", "current", "playing", "speed", "loop"}`. Shows rows with `current - window < t <= current` on layers with a `getFilterValue` accessor. |
+| `filterTime` | float | Output-only. Playback position while playing. |
 
 ### Time filter and playback
 
-Send a block of intervals once; the browser steps through them on the GPU with no server call per step. Give each row a numeric time (any unit, e.g. epoch seconds) and name it in `_accessors["getFilterValue"]`. Times are uploaded relative to `domain[0]` as float32, so they stay exact for any realistic block.
-
-- `domain`: first and last row time, inclusive. `step`: interval length; `current` is snapped down to `t0 + k * step`.
-- `window`: trailing span shown, half-open `(current - window, current]`; defaults to `step`, i.e. exactly one interval.
-- `playing` / `speed` (time units per second, default one `step` a second) / `loop`. Playback pauses while the tab is hidden; reaching `t1` without `loop` sets `playing` to false.
-- Setting `current` seeks. Only playback reports `filterTime`, and a `current` equal to a value reported in the last 5 s is treated as an echo and ignored (unless `domain` changed too), so a slider can follow `filterTime` and drive `current` without jitter. Readouts should follow the slider:
-
 ```python
-layer = {"_type": "ScatterplotLayer", "data": rows,  # rows carry "t" in epoch seconds
+layer = {"_type": "ScatterplotLayer", "data": rows,
          "_accessors": {"getPosition": "pos", "getFillColor": "color", "getFilterValue": "t"}}
 EpecDeckMap(id="map", layers=[layer],
             timeFilter={"domain": [t0, t1], "step": 300, "current": t0, "speed": 1200})

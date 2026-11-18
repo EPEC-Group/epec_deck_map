@@ -30,10 +30,9 @@ const CYCLE_DURATION_MS = 4000;        // one full 0..loopLength cycle every 4s
 const DEFAULT_LOOP_LENGTH = 1.0;
 const DEFAULT_TRAIL_LENGTH = 0.3;
 
-// Time filter: one shared extension instance so layer diffs never see a new one.
 const FILTER_EXTENSIONS = [new DataFilterExtension({ filterSize: 1 })];
-const REPORT_INTERVAL_MS = 250;   // filterTime reaches Dash at most 4 times a second
-const ECHO_MS = 5000;             // a `current` equal to a value reported this recently is an echo
+const REPORT_INTERVAL_MS = 250;
+const ECHO_MS = 5000;
 
 /**
  * Convert a layer spec dict (from Python) into a real deck.gl Layer instance.
@@ -90,8 +89,7 @@ function buildLayer(spec, currentTime, filter) {
         props[propName] = (d) => d[dataKey];
     }
 
-    // GPU time filter. Values are uploaded relative to the domain start because
-    // the filter attribute is float32; only filterRange changes per step.
+    // float32 attribute, so times are relative to the domain start.
     if (_accessors.getFilterValue) {
         const key = _accessors.getFilterValue;
         const t0 = filter ? filter.t0 : 0;
@@ -105,14 +103,9 @@ function buildLayer(spec, currentTime, filter) {
     return new LayerClass(props);
 }
 
-// Shader bounds are inclusive and float32; nudging both up by ~8 ulp makes the
-// window exactly (lo, hi] for row times that are themselves exact.
+// Inclusive float32 bounds; the nudge makes the window (lo, hi].
 const nudge = (v) => v + (Math.abs(v) + 1) * 2 ** -20;
 
-/**
- * Client-side playback of `timeFilter`; returns the GPU filter for layers that
- * declare `getFilterValue`, or null when no time filter is set.
- */
 function useTimeFilter(timeFilter, setProps) {
     const tf = timeFilter || null;
     const [t0, t1] = tf && Array.isArray(tf.domain) ? tf.domain.map(Number) : [0, 0];
@@ -124,7 +117,6 @@ function useTimeFilter(timeFilter, setProps) {
     const cur = tf && tf.current != null ? Number(tf.current) : null;
 
     const snap = useCallback(
-        // The small bias stops accumulated float drift flooring onto the previous step.
         (p) => (step ? t0 + Math.floor((p - t0) / step + 1e-6) * step : p),
         [t0, step],
     );
@@ -140,7 +132,6 @@ function useTimeFilter(timeFilter, setProps) {
     setPropsRef.current = setProps;
     const [shown, setShown] = useState(null);
 
-    // Only playback reports: echoing a Python seek back would race the user's next drag.
     const report = useCallback((t) => {
         pendingRef.current = t;
         if (timerRef.current != null) return;
@@ -154,8 +145,6 @@ function useTimeFilter(timeFilter, setProps) {
     }, []);
     useEffect(() => () => clearTimeout(timerRef.current), []);
 
-    // Seek when Python sets a new `current`, unless it is our own report echoed back.
-    // A new domain is a new block of data, so its `current` is never an echo.
     const domainRef = useRef(null);
     useEffect(() => {
         if (!tf) return;
@@ -204,7 +193,6 @@ function useTimeFilter(timeFilter, setProps) {
             if (s !== prev) { prev = s; setShown(s); report(s); }
             if (finished) {
                 stop();
-                // `current` is left as Python last set it, so this is not a seek.
                 setPropsRef.current && setPropsRef.current({ timeFilter: { ...tfRef.current, playing: false } });
             }
         };
@@ -259,8 +247,6 @@ function EpecDeckMap({
         return { tripsSpecs: trips, otherSpecs: others };
     }, [layers]);
 
-    // Static layers: rebuilt when their specs or the time-filter step change, never per
-    // trips frame. A filter step only changes filterRange, so no attribute is recomputed.
     const otherLayers = useMemo(
         () => otherSpecs.map(s => buildLayer(s, undefined, filter)).filter(Boolean),
         [otherSpecs, filter],
@@ -418,11 +404,7 @@ EpecDeckMap.propTypes = {
      * feature: { object: <data row dict>, coordinate: [lon, lat], layerId: string }
      */
     clickInfo: PropTypes.object,
-    /**
-     * Client-side time window over layers whose `_accessors` name a
-     * `getFilterValue` column: {domain: [t0, t1], step, window, current,
-     * playing, speed, loop}. Rows with current - window < t <= current are drawn.
-     */
+    /** {domain: [t0, t1], step, window, current, playing, speed, loop} */
     timeFilter: PropTypes.shape({
         domain: PropTypes.arrayOf(PropTypes.number).isRequired,
         step: PropTypes.number,
@@ -432,7 +414,7 @@ EpecDeckMap.propTypes = {
         speed: PropTypes.number,
         loop: PropTypes.bool,
     }),
-    /** Output-only. The step-snapped playback position, at most 4 Hz while playing. */
+    /** Output-only. Playback position while playing. */
     filterTime: PropTypes.number,
     /** Injected by Dash to propagate prop updates back to Python */
     setProps: PropTypes.func,
