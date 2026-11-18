@@ -19,13 +19,21 @@ class EpecDeckMap(Component):
         Layer spec dicts.  Each dict must have ``_type`` (the deck.gl class
         name), ``_accessors`` (mapping camelCase prop → snake_case data key),
         and any additional static props understood by that layer class.
-        A TripsLayer spec may also set ``arrowheads``, ``pulseSpacing``,
-        ``speedZoom`` and ``speedZoomStrength`` (see README).
+        Optional ``minZoom`` (inclusive) / ``maxZoom`` (exclusive) limit the
+        layer to a zoom range.
+        A PathLayer spec may set ``chevrons``; a TripsLayer spec
+        ``pulseSpacing``, ``speedZoom`` and ``speedZoomStrength`` (see README).
     viewState : dict
         Initial camera ``{latitude, longitude, zoom, pitch}``.  Used once on
         mount; user pan/zoom is managed internally by deck.gl.
-    mapStyle : str
-        Basemap tile URL (Carto GL JSON style or Mapbox URL).
+    mapStyle : str | dict
+        MapLibre style URL or style JSON dict.
+    mapSources : dict
+        Extra MapLibre sources, ``{source_id: source_json}``.
+    mapLayers : list
+        Extra MapLibre layer dicts; optional ``beforeId``.
+    interleaved : bool
+        Render deck.gl inside MapLibre, so a layer spec's ``beforeId`` works.
     pickingRadius : int
         Picking radius in pixels (default 5).  Replaces the fat invisible
         PathLayer workaround from dash-deck.
@@ -36,6 +44,12 @@ class EpecDeckMap(Component):
     clickInfo : dict
         Output-only.  Set when user clicks a pickable feature:
         ``{"object": <data row>, "coordinate": [lon, lat], "layerId": str}``.
+    timeFilter : dict
+        ``{"domain": [t0, t1], "step", "window", "current", "playing",
+        "speed", "loop"}``.  Shows rows with ``current - window < t <=
+        current`` on layers with a ``getFilterValue`` accessor.
+    filterTime : float
+        Output-only.  Playback position while playing.
     """
 
     _prop_names = [
@@ -43,9 +57,14 @@ class EpecDeckMap(Component):
         'layers',
         'viewState',
         'mapStyle',
+        'mapSources',
+        'mapLayers',
+        'interleaved',
         'pickingRadius',
         'tooltip',
         'clickInfo',
+        'timeFilter',
+        'filterTime',
     ]
     _type = 'EpecDeckMap'
     _namespace = 'epec_deck_map'
@@ -69,9 +88,14 @@ class EpecDeckMap(Component):
         layers=Component.UNDEFINED,
         viewState=Component.UNDEFINED,
         mapStyle=Component.UNDEFINED,
+        mapSources=Component.UNDEFINED,
+        mapLayers=Component.UNDEFINED,
+        interleaved=Component.UNDEFINED,
         pickingRadius=Component.UNDEFINED,
         tooltip=Component.UNDEFINED,
         clickInfo=Component.UNDEFINED,
+        timeFilter=Component.UNDEFINED,
+        filterTime=Component.UNDEFINED,
         **kwargs
     ):
         self._prop_names = EpecDeckMap._prop_names

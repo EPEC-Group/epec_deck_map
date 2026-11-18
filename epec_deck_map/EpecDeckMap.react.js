@@ -1,9 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import DeckGL from '@deck.gl/react';
+import { DataFilterExtension } from '@deck.gl/extensions';
 import { IconLayer, PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { TripsLayer } from '@deck.gl/geo-layers';
-import { Map } from 'react-map-gl/maplibre';
+import { MapboxOverlay } from '@deck.gl/mapbox';
+import { Map, useControl, useMap } from 'react-map-gl/maplibre';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -29,34 +31,33 @@ const CYCLE_DURATION_MS = 4000;        // one full 0..loopLength cycle every 4s
 const DEFAULT_LOOP_LENGTH = 1.0;
 const DEFAULT_TRAIL_LENGTH = 0.3;
 
-const DEFAULT_ARROW_SIZE = 8;
-const DEFAULT_ARROW_SPACING = 150;
-const MAX_ARROWS_PER_ROW = 64;
-const DEFAULT_TRIPS_COLOR = [0, 0, 0, 255];
-const ARROW_ICON_PX = 64;
-const ARROW_MAPPING = {
-    arrow: { x: 0, y: 0, width: ARROW_ICON_PX, height: ARROW_ICON_PX, anchorX: 60, anchorY: 32, mask: true },
+const DEFAULT_CHEVRONS = { interval: 80, size: 6, color: [255, 255, 255, 255], clearance: 8, maxTurn: 35 };
+const MAX_CHEVRONS_PER_ROW = 200;
+const CHEVRON_ICON_PX = 64;
+const CHEVRON_MAPPING = {
+    chevron: { x: 0, y: 0, width: CHEVRON_ICON_PX, height: CHEVRON_ICON_PX, anchorX: 32, anchorY: 32, mask: true },
 };
-let arrowAtlas = null;
+let chevronAtlas = null;
 
-function getArrowAtlas() {
-    if (!arrowAtlas) {
+function getChevronAtlas() {
+    if (!chevronAtlas) {
         const canvas = document.createElement('canvas');
-        canvas.width = ARROW_ICON_PX;
-        canvas.height = ARROW_ICON_PX;
+        canvas.width = CHEVRON_ICON_PX;
+        canvas.height = CHEVRON_ICON_PX;
         const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 16;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         ctx.beginPath();
-        ctx.moveTo(6, 8);
-        ctx.lineTo(60, 32);
-        ctx.lineTo(6, 56);
-        ctx.lineTo(20, 32);
-        ctx.closePath();
-        ctx.fill();
+        ctx.moveTo(14, 8);
+        ctx.lineTo(50, 32);
+        ctx.lineTo(14, 56);
+        ctx.stroke();
         // Not a data: URL, which deck.gl fetches and the portal CSP blocks.
-        arrowAtlas = canvas;
+        chevronAtlas = canvas;
     }
-    return arrowAtlas;
+    return chevronAtlas;
 }
 
 function toWorld([lng, lat]) {
@@ -69,74 +70,66 @@ function fromWorld(x, y) {
     return [x / 512 * 360 - 180, lat * 180 / Math.PI];
 }
 
-function arrowTracks(spec, zoom, loopLength) {
-    const { arrowheads, _accessors = {}, data, id } = spec;
-    if (!arrowheads) return null;
-    const size = arrowheads.size || DEFAULT_ARROW_SIZE;
-    const spacing = Math.max(arrowheads.spacing || DEFAULT_ARROW_SPACING, size);
+/** Chevrons every `interval` px along rows whose direction is 1 (vertex order) or -1. */
+function chevronLayer(spec, zoom) {
+    const { chevrons, _accessors = {}, data, id } = spec;
+    const { getPath, getDirection } = _accessors;
+    if (!chevrons || !data || !getPath || !getDirection) return null;
+    const { interval, size, color, clearance, maxTurn } = { ...DEFAULT_CHEVRONS, ...chevrons };
     const scale = 2 ** zoom;
-    const { getPath, getTimestamps, getColor } = _accessors;
-    const tracks = [];
-    for (const row of (data || [])) {
+    const cosMax = Math.cos(maxTurn * Math.PI / 180);
+    const marks = [];
+    for (const row of data) {
+        const dir = Number(row[getDirection]);
         const path = row[getPath];
-        const ts = row[getTimestamps];
-        if (!path || !ts || path.length < 2 || ts.length !== path.length) continue;
+        if ((dir !== 1 && dir !== -1) || !path || path.length < 2) continue;
         const xy = path.map(toWorld);
-        let length = 0;
+        const cum = [0];
         for (let i = 1; i < xy.length; i++) {
-            length += Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]);
+            cum.push(cum[i - 1] + Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]) * scale);
         }
-        length *= scale;
-        const span = Math.abs(ts[ts.length - 1] - ts[0]);
-        if (length < Math.max(2 * size, arrowheads.minLength || 0) || !(span > 0)) continue;
-        const period = spec.pulseSpacing > 0
-            ? rowPulseSpacing(span, spec.trailLength != null ? spec.trailLength : DEFAULT_TRAIL_LENGTH, spec.pulseSpacing)
-            : loopLength;
-        const n = Math.min(MAX_ARROWS_PER_ROW, Math.max(1, Math.floor(period * length / (span * spacing))));
-        const color = arrowheads.color || (getColor ? row[getColor] : spec.getColor) || DEFAULT_TRIPS_COLOR;
-        tracks.push({ xy, ts, step: period / n, color });
-    }
-    return { id: `${id}-arrowheads`, size, tracks };
-}
-
-function arrowheadLayer({ id, size, tracks }, currentTime) {
-    const arrows = [];
-    for (const { xy, ts, step, color } of tracks) {
-        const last = ts.length - 1;
-        const rising = ts[last] >= ts[0];
-        const lo = rising ? ts[0] : ts[last];
-        const hi = rising ? ts[last] : ts[0];
-        for (let t = lo + (((currentTime - lo) % step) + step) % step; t <= hi; t += step) {
-            let a = 0;
-            let b = last;
-            while (b - a > 1) {
-                const m = (a + b) >> 1;
-                if ((ts[m] <= t) === rising) a = m; else b = m;
-            }
-            const f = ts[b] === ts[a] ? 0 : (t - ts[a]) / (ts[b] - ts[a]);
+        const length = cum[cum.length - 1];
+        if (length < 2 * size) continue;
+        const sharp = [];
+        for (let i = 1; i < xy.length - 1; i++) {
+            const ax = xy[i][0] - xy[i - 1][0];
+            const ay = xy[i][1] - xy[i - 1][1];
+            const bx = xy[i + 1][0] - xy[i][0];
+            const by = xy[i + 1][1] - xy[i][1];
+            const d = Math.hypot(ax, ay) * Math.hypot(bx, by);
+            if (d > 0 && (ax * bx + ay * by) / d < cosMax) sharp.push(cum[i]);
+        }
+        const n = Math.min(MAX_CHEVRONS_PER_ROW, Math.max(1, Math.floor(length / interval)));
+        const start = (length - (n - 1) * interval) / 2;
+        let b = 1;
+        for (let k = 0; k < n; k++) {
+            const at = start + k * interval;
+            if (sharp.some(v => Math.abs(v - at) < clearance)) continue;
+            while (b < cum.length - 1 && cum[b] < at) b++;
+            const a = b - 1;
+            const f = cum[b] === cum[a] ? 0 : (at - cum[a]) / (cum[b] - cum[a]);
             const dx = xy[b][0] - xy[a][0];
             const dy = xy[b][1] - xy[a][1];
-            const dir = rising ? 1 : -1;
-            arrows.push({
+            marks.push({
                 position: fromWorld(xy[a][0] + f * dx, xy[a][1] + f * dy),
                 angle: Math.atan2(dir * dy, dir * dx) * 180 / Math.PI,
-                color,
             });
         }
     }
     return new IconLayer({
-        id,
-        data: arrows,
-        iconAtlas: getArrowAtlas(),
-        iconMapping: ARROW_MAPPING,
-        getIcon: () => 'arrow',
+        id: `${id}-chevrons`,
+        data: marks,
+        iconAtlas: getChevronAtlas(),
+        iconMapping: CHEVRON_MAPPING,
+        getIcon: () => 'chevron',
         getPosition: d => d.position,
         getAngle: d => d.angle,
-        getColor: d => d.color,
+        getColor: color,
         getSize: size,
         sizeUnits: 'pixels',
         billboard: false,
         pickable: false,
+        visible: spec.visible !== false && inZoomRange(spec, zoom),
     });
 }
 
@@ -165,6 +158,10 @@ function expandPulses(spec) {
     return { ...spec, data: rows };
 }
 
+const FILTER_EXTENSIONS = [new DataFilterExtension({ filterSize: 1 })];
+const REPORT_INTERVAL_MS = 250;
+const ECHO_MS = 5000;
+
 /**
  * Convert a layer spec dict (from Python) into a real deck.gl Layer instance.
  *
@@ -183,6 +180,8 @@ function expandPulses(spec) {
  *     pickable: true,
  *     getTextAnchor: "middle",   // constant string, NOT a data accessor
  *     characterSet: [...],       // no @@= corruption possible here
+ *     minZoom: 7,
+ *     maxZoom: 10,
  *     ...
  *   }
  *
@@ -192,8 +191,26 @@ function expandPulses(spec) {
  * Workaround #3 retired: clickInfo.object is the exact data-row dict; keys are always
  *   whatever Python put in the data list (snake_case). No camelCase conversion happens.
  */
-function buildLayer(spec, currentTime) {
-    const { _type, _accessors = {}, loopLength, pulseSpacing, speedZoom, speedZoomStrength, arrowheads, ...rest } = spec;
+function inZoomRange(spec, zoom) {
+    return (spec.minZoom == null || zoom >= spec.minZoom)
+        && (spec.maxZoom == null || zoom < spec.maxZoom);
+}
+
+function zoomGateKey(specs, zoom) {
+    let key = '';
+    for (const s of (specs || [])) {
+        if (s && (s.minZoom != null || s.maxZoom != null)) {
+            key += inZoomRange(s, zoom) ? '1' : '0';
+        }
+    }
+    return key;
+}
+
+function buildLayer(spec, zoom, currentTime, filter) {
+    const {
+        _type, _accessors = {}, loopLength, minZoom, maxZoom,
+        pulseSpacing, speedZoom, speedZoomStrength, chevrons, ...rest
+    } = spec;
     const LayerClass = LAYER_MAP[_type];
     if (!LayerClass) {
         console.warn(`EpecDeckMap: unknown layer type "${_type}" — skipping`);
@@ -202,6 +219,7 @@ function buildLayer(spec, currentTime) {
 
     // Start with all static props (data, id, widthScale, characterSet, …)
     const props = { ...rest };
+    props.visible = rest.visible !== false && inZoomRange(spec, zoom);
 
     // TripsLayer is the only animated layer: inject the per-frame currentTime and
     // fall back to a sane trailLength if Python did not supply one.
@@ -214,11 +232,193 @@ function buildLayer(spec, currentTime) {
 
     // Convert each _accessors entry into a real accessor function.
     // e.g. { "getPath": "path" } → getPath: d => d["path"]
+    const updateTriggers = { ...rest.updateTriggers };
     for (const [propName, dataKey] of Object.entries(_accessors)) {
+        if (propName === 'getDirection') continue;
         props[propName] = (d) => d[dataKey];
+        updateTriggers[propName] = dataKey;
+    }
+    props.updateTriggers = updateTriggers;
+
+    // float32 attribute, so times are relative to the domain start.
+    if (_accessors.getFilterValue) {
+        const key = _accessors.getFilterValue;
+        const t0 = filter ? filter.t0 : 0;
+        props.getFilterValue = (d) => d[key] - t0;
+        props.extensions = FILTER_EXTENSIONS;
+        props.filterEnabled = Boolean(filter);
+        props.filterRange = filter ? filter.range : [0, 0];
+        props.updateTriggers = { ...props.updateTriggers, getFilterValue: t0 };
     }
 
     return new LayerClass(props);
+}
+
+// Inclusive float32 bounds; the nudge makes the window (lo, hi].
+const nudge = (v) => v + (Math.abs(v) + 1) * 2 ** -20;
+
+function useTimeFilter(timeFilter, setProps) {
+    const tf = timeFilter || null;
+    const [t0, t1] = tf && Array.isArray(tf.domain) ? tf.domain.map(Number) : [0, 0];
+    const step = tf && tf.step > 0 ? Number(tf.step) : null;
+    const win = tf && tf.window != null ? Number(tf.window) : (step || t1 - t0);
+    const speed = tf && tf.speed > 0 ? Number(tf.speed) : (step || (t1 - t0) / 10);
+    const playing = Boolean(tf && tf.playing);
+    const loop = Boolean(tf && tf.loop);
+    const cur = tf && tf.current != null ? Number(tf.current) : null;
+
+    const snap = useCallback(
+        (p) => (step ? t0 + Math.floor((p - t0) / step + 1e-6) * step : p),
+        [t0, step],
+    );
+
+    const posRef = useRef(null);
+    const sentRef = useRef([]);
+    const lastSentAt = useRef(-Infinity);
+    const timerRef = useRef(null);
+    const pendingRef = useRef(null);
+    const tfRef = useRef(tf);
+    tfRef.current = tf;
+    const setPropsRef = useRef(setProps);
+    setPropsRef.current = setProps;
+    const [shown, setShown] = useState(null);
+
+    const report = useCallback((t) => {
+        pendingRef.current = t;
+        if (timerRef.current != null) return;
+        const wait = REPORT_INTERVAL_MS - (performance.now() - lastSentAt.current);
+        timerRef.current = setTimeout(() => {
+            timerRef.current = null;
+            lastSentAt.current = performance.now();
+            sentRef.current.push({ t: pendingRef.current, at: lastSentAt.current });
+            setPropsRef.current && setPropsRef.current({ filterTime: pendingRef.current });
+        }, Math.max(wait, 0));
+    }, []);
+    useEffect(() => () => clearTimeout(timerRef.current), []);
+
+    const domainRef = useRef(null);
+    useEffect(() => {
+        if (!tf) return;
+        if (domainRef.current !== `${t0},${t1}`) sentRef.current = [];
+        domainRef.current = `${t0},${t1}`;
+        const now = performance.now();
+        sentRef.current = sentRef.current.filter(r => now - r.at < ECHO_MS);
+        const echo = sentRef.current.some(r => r.t === cur);
+        let p = posRef.current;
+        if (p == null || (cur != null && !echo)) {
+            p = cur != null ? cur : t0;
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+        }
+        p = Math.min(Math.max(p, t0), t1);
+        posRef.current = p;
+        setShown(snap(p));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tf != null, cur, t0, t1, snap]);
+
+    useEffect(() => {
+        if (!playing) return undefined;
+        const end = t1 + (step || 0);
+        if (posRef.current == null || posRef.current >= (loop ? end : t1)) posRef.current = t0;
+        let prev = snap(posRef.current);
+        setShown(prev);
+        report(prev);
+
+        let rafId = null;
+        let lastTs = null;
+        const stop = () => {
+            if (rafId != null) cancelAnimationFrame(rafId);
+            rafId = null;
+        };
+        const tick = (ts) => {
+            rafId = requestAnimationFrame(tick);
+            if (lastTs == null) { lastTs = ts; return; }
+            if (ts - lastTs < FRAME_INTERVAL_MS) return;
+            let p = posRef.current + ((ts - lastTs) / 1000) * speed;
+            lastTs = ts;
+            if (p >= end && loop) p = t0;
+            const finished = !loop && p >= t1;
+            if (finished) p = t1;
+            posRef.current = p;
+            const s = snap(p);
+            if (s !== prev) { prev = s; setShown(s); report(s); }
+            if (finished) {
+                stop();
+                setPropsRef.current && setPropsRef.current({ timeFilter: { ...tfRef.current, playing: false } });
+            }
+        };
+        const start = () => {
+            if (rafId == null) { lastTs = null; rafId = requestAnimationFrame(tick); }
+        };
+        const onVisibility = () => (document.hidden ? stop() : start());
+        document.addEventListener('visibilitychange', onVisibility);
+        if (!document.hidden) start();
+        return () => {
+            document.removeEventListener('visibilitychange', onVisibility);
+            stop();
+        };
+    }, [playing, loop, t0, t1, step, speed, snap, report]);
+
+    return useMemo(() => {
+        if (!tf || shown == null) return null;
+        const hi = shown - t0;
+        return { t0, range: [nudge(hi - win), nudge(hi)] };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tf != null, shown, t0, win]);
+}
+
+const isPlainObject = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
+
+function BasemapOverlays({ sources, layers }) {
+    const { current } = useMap();
+    useEffect(() => {
+        const map = current && current.getMap();
+        if (!map) return undefined;
+        const addedSources = new Set();
+        const addedLayers = new Set();
+        const failed = new Set();
+        const add = (key, exists, fn) => {
+            if (failed.has(key) || exists()) return false;
+            try {
+                fn();
+            } catch (err) {
+                console.warn(`EpecDeckMap: ${key}: ${err.message}`);
+            }
+            if (exists()) return true;
+            failed.add(key);
+            return false;
+        };
+        const apply = () => {
+            // style.loaded() also waits on tiles.
+            if (!map.style || !map.style._loaded) return;
+            for (const [sid, spec] of Object.entries(sources)) {
+                if (add(`source ${sid}`, () => map.getSource(sid), () => map.addSource(sid, spec))) {
+                    addedSources.add(sid);
+                }
+            }
+            for (const { beforeId, ...layer } of layers) {
+                const before = beforeId && map.getLayer(beforeId) ? beforeId : undefined;
+                if (add(`layer ${layer.id}`, () => map.getLayer(layer.id), () => map.addLayer(layer, before))) {
+                    addedLayers.add(layer.id);
+                }
+            }
+        };
+        apply();
+        map.on('styledata', apply);
+        return () => {
+            map.off('styledata', apply);
+            if (!map.style) return;
+            for (const lid of addedLayers) if (map.getLayer(lid)) map.removeLayer(lid);
+            for (const sid of addedSources) if (map.getSource(sid)) map.removeSource(sid);
+        };
+    }, [current, sources, layers]);
+    return null;
+}
+
+function DeckOverlay(props) {
+    const overlay = useControl(() => new MapboxOverlay(props));
+    overlay.setProps(props);
+    return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,10 +429,46 @@ function EpecDeckMap({
     layers,
     viewState,
     mapStyle,
+    mapSources,
+    mapLayers,
+    interleaved,
     pickingRadius,
     tooltip,
+    timeFilter,
     setProps,
 }) {
+    const initialViewState = viewState || {
+        latitude: -25.5,
+        longitude: 134.5,
+        zoom: 4,
+        pitch: 0,
+    };
+
+    const zoomRef = useRef(initialViewState.zoom);
+    const viewKeyRef = useRef(null);
+    const viewKey = JSON.stringify(initialViewState);
+    if (viewKeyRef.current !== viewKey) {
+        viewKeyRef.current = viewKey;
+        zoomRef.current = initialViewState.zoom;
+    }
+    const gateKey = zoomGateKey(layers, zoomRef.current);
+    const layersRef = useRef(layers);
+    const gateKeyRef = useRef(gateKey);
+    layersRef.current = layers;
+    gateKeyRef.current = gateKey;
+    const [, forceRender] = useReducer(n => n + 1, 0);
+    const [zoomKey, setZoomKey] = useState(() => Math.round(initialViewState.zoom * 2) / 2);
+
+    const handleViewStateChange = useCallback(({ viewState: vs }) => {
+        zoomRef.current = vs.zoom;
+        setZoomKey(Math.round(vs.zoom * 2) / 2);
+        if (zoomGateKey(layersRef.current, vs.zoom) !== gateKeyRef.current) {
+            forceRender();
+        }
+    }, []);
+
+    const filter = useTimeFilter(timeFilter, setProps);
+
     // Split specs into animated (TripsLayer) and everything else. Non-trips
     // layers are memoised and never rebuilt per frame; only the trips layers
     // are rebuilt each frame with an updated currentTime.
@@ -249,10 +485,14 @@ function EpecDeckMap({
         return { tripsSpecs: trips, otherSpecs: others };
     }, [layers]);
 
-    // Static layers — rebuilt only when their specs change (NOT each frame).
     const otherLayers = useMemo(
-        () => otherSpecs.map(s => buildLayer(s)).filter(Boolean),
-        [otherSpecs],
+        () => otherSpecs.map(s => buildLayer(s, zoomRef.current, undefined, filter)),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [otherSpecs, gateKey, filter],
+    );
+    const chevronLayers = useMemo(
+        () => otherSpecs.map(s => chevronLayer(s, zoomKey)),
+        [otherSpecs, zoomKey],
     );
 
     // A single shared cycle length for all pulses: the max loopLength across
@@ -269,23 +509,12 @@ function EpecDeckMap({
     // Advanced by the rAF loop below; only meaningful when trips layers exist.
     const [currentTime, setCurrentTime] = useState(0);
 
-    const zoomRef = useRef((viewState && viewState.zoom) || 4);
-    const [zoomKey, setZoomKey] = useState(() => Math.round(zoomRef.current * 2) / 2);
-    const onViewStateChange = useCallback(({ viewState: vs }) => {
-        zoomRef.current = vs.zoom;
-        setZoomKey(Math.round(vs.zoom * 2) / 2);
-    }, []);
-
     const [speedZoom, speedZoomStrength] = useMemo(() => {
         const s = tripsSpecs.find(t => t.speedZoom != null);
         if (!s) return [null, 1];
         const k = Number(s.speedZoomStrength);
         return [Number(s.speedZoom), Number.isFinite(k) ? k : 1];
     }, [tripsSpecs]);
-    const arrowSets = useMemo(
-        () => tripsSpecs.map(s => arrowTracks(s, zoomKey, loopLength)).filter(Boolean),
-        [tripsSpecs, zoomKey, loopLength],
-    );
 
     // Animation loop — runs only while there is at least one TripsLayer spec and
     // the tab is visible. Throttled to ~30fps; pauses on visibilitychange.
@@ -343,18 +572,15 @@ function EpecDeckMap({
     // Trips layers rebuilt each frame with the current time; drawn on top of the
     // static layers. deck.gl diffs efficiently, so only these update per frame.
     const pulseSpecs = useMemo(() => tripsSpecs.map(expandPulses), [tripsSpecs]);
-
     const tripsLayers = useMemo(
-        () => [
-            ...pulseSpecs.map(s => buildLayer(s, currentTime)).filter(Boolean),
-            ...arrowSets.map(a => arrowheadLayer(a, currentTime)),
-        ],
-        [pulseSpecs, arrowSets, currentTime],
+        () => pulseSpecs.map(s => buildLayer(s, zoomRef.current, currentTime, filter)).filter(Boolean),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [pulseSpecs, currentTime, gateKey, filter],
     );
 
     const deckLayers = useMemo(
-        () => [...otherLayers, ...tripsLayers],
-        [otherLayers, tripsLayers],
+        () => [...otherLayers.flatMap((l, i) => [l, chevronLayers[i]]).filter(Boolean), ...tripsLayers],
+        [otherLayers, chevronLayers, tripsLayers],
     );
 
     // Click handler: emit clickInfo via setProps.
@@ -387,30 +613,58 @@ function EpecDeckMap({
         [tooltip],
     );
 
-    const initialViewState = viewState || {
-        latitude: -25.5,
-        longitude: 134.5,
-        zoom: 4,
-        pitch: 0,
-    };
+    const overlaySources = useMemo(
+        () => (isPlainObject(mapSources)
+            ? Object.fromEntries(Object.entries(mapSources).filter(([, s]) => isPlainObject(s)))
+            : {}),
+        [mapSources],
+    );
+    const overlayLayers = useMemo(
+        () => (Array.isArray(mapLayers)
+            ? mapLayers.filter(l => isPlainObject(l) && typeof l.id === 'string')
+            : []),
+        [mapLayers],
+    );
+    const style = isPlainObject(mapStyle) || typeof mapStyle === 'string' ? mapStyle : undefined;
+    const overlays = <BasemapOverlays sources={overlaySources} layers={overlayLayers} />;
+    const radius = pickingRadius != null ? pickingRadius : 5;
 
     return (
         <div
             id={id}
             style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
         >
-            <DeckGL
-                initialViewState={initialViewState}
-                controller={true}
-                layers={deckLayers}
-                pickingRadius={pickingRadius != null ? pickingRadius : 5}
-                onClick={handleClick}
-                onViewStateChange={onViewStateChange}
-                getTooltip={getTooltip}
-            >
-                {/* maplibre-gl basemap — no Mapbox token required for Carto tiles */}
-                <Map mapStyle={mapStyle} mapLib={maplibregl} />
-            </DeckGL>
+            {interleaved ? (
+                <Map
+                    initialViewState={initialViewState}
+                    mapStyle={style}
+                    mapLib={maplibregl}
+                    style={{ width: '100%', height: '100%' }}
+                    onMove={handleViewStateChange}
+                >
+                    {overlays}
+                    <DeckOverlay
+                        interleaved
+                        layers={deckLayers}
+                        pickingRadius={radius}
+                        onClick={handleClick}
+                        getTooltip={getTooltip}
+                    />
+                </Map>
+            ) : (
+                <DeckGL
+                    initialViewState={initialViewState}
+                    controller={true}
+                    onViewStateChange={handleViewStateChange}
+                    layers={deckLayers}
+                    pickingRadius={radius}
+                    onClick={handleClick}
+                    getTooltip={getTooltip}
+                >
+                    {/* maplibre-gl basemap — no Mapbox token required for Carto tiles */}
+                    <Map mapStyle={style} mapLib={maplibregl}>{overlays}</Map>
+                </DeckGL>
+            )}
         </div>
     );
 }
@@ -422,8 +676,14 @@ EpecDeckMap.propTypes = {
     layers: PropTypes.array,
     /** Initial camera position {latitude, longitude, zoom, pitch} */
     viewState: PropTypes.object,
-    /** Basemap tile URL (Carto, Mapbox, etc.) */
-    mapStyle: PropTypes.string,
+    /** MapLibre style: a style URL or a full style JSON object */
+    mapStyle: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
+    /** Extra MapLibre sources: {sourceId: source JSON} */
+    mapSources: PropTypes.object,
+    /** Extra MapLibre layer dicts; optional `beforeId` */
+    mapLayers: PropTypes.array,
+    /** Render deck.gl inside MapLibre, so a layer spec's `beforeId` works */
+    interleaved: PropTypes.bool,
     /** Picking radius in pixels — replaces the fat invisible PathLayer workaround */
     pickingRadius: PropTypes.number,
     /**
@@ -436,6 +696,18 @@ EpecDeckMap.propTypes = {
      * feature: { object: <data row dict>, coordinate: [lon, lat], layerId: string }
      */
     clickInfo: PropTypes.object,
+    /** {domain: [t0, t1], step, window, current, playing, speed, loop} */
+    timeFilter: PropTypes.shape({
+        domain: PropTypes.arrayOf(PropTypes.number).isRequired,
+        step: PropTypes.number,
+        window: PropTypes.number,
+        current: PropTypes.number,
+        playing: PropTypes.bool,
+        speed: PropTypes.number,
+        loop: PropTypes.bool,
+    }),
+    /** Output-only. Playback position while playing. */
+    filterTime: PropTypes.number,
     /** Injected by Dash to propagate prop updates back to Python */
     setProps: PropTypes.func,
 };
