@@ -35,12 +35,10 @@ const MAX_ARROWS_PER_ROW = 64;
 const DEFAULT_TRIPS_COLOR = [0, 0, 0, 255];
 const ARROW_ICON_PX = 64;
 const ARROW_MAPPING = {
-    // Anchored at the tip so the arrow ends exactly on the pulse head.
     arrow: { x: 0, y: 0, width: ARROW_ICON_PX, height: ARROW_ICON_PX, anchorX: 60, anchorY: 32, mask: true },
 };
 let arrowAtlas = null;
 
-/** Lazily drawn white arrowhead pointing east, tinted per arrow via mask. */
 function getArrowAtlas() {
     if (!arrowAtlas) {
         const canvas = document.createElement('canvas');
@@ -55,33 +53,22 @@ function getArrowAtlas() {
         ctx.lineTo(20, 32);
         ctx.closePath();
         ctx.fill();
-        // The canvas itself, not a data: URL, which deck.gl would fetch and a strict CSP connect-src blocks.
+        // Not a data: URL, which deck.gl fetches and the portal CSP blocks.
         arrowAtlas = canvas;
     }
     return arrowAtlas;
 }
 
-/** [lng, lat] to Web Mercator world units at zoom 0 (512 wide, y north). */
 function toWorld([lng, lat]) {
     const phi = lat * Math.PI / 180;
     return [512 * (lng + 180) / 360, 512 * (0.5 + Math.log(Math.tan(Math.PI / 4 + phi / 2)) / (2 * Math.PI))];
 }
 
-/** Inverse of toWorld. */
 function fromWorld(x, y) {
     const lat = 2 * Math.atan(Math.exp((y / 512 - 0.5) * 2 * Math.PI)) - Math.PI / 2;
     return [x / 512 * 360 - 180, lat * 180 / Math.PI];
 }
 
-/**
- * Per-row arrowhead geometry for a trips spec with an `arrowheads` key, or null.
- *
- * Each row gets a timestamp step that puts consecutive arrows at least `spacing`
- * screen pixels apart (closer only where pulses themselves are) at this zoom, snapped so the pulse period (pulseSpacing,
- * else loopLength) is a whole number of steps: every pulse head carries an
- * arrow and the arrows cycle seamlessly with the pulses. Rows shorter on
- * screen than two arrows get none.
- */
 function arrowTracks(spec, zoom, loopLength) {
     const { arrowheads, _accessors = {}, data, id } = spec;
     if (!arrowheads) return null;
@@ -112,7 +99,6 @@ function arrowTracks(spec, zoom, loopLength) {
     return { id: `${id}-arrowheads`, size, tracks };
 }
 
-/** Arrowheads at every timestamp congruent to currentTime modulo each row's step. */
 function arrowheadLayer({ id, size, tracks }, currentTime) {
     const arrows = [];
     for (const { xy, ts, step, color } of tracks) {
@@ -154,18 +140,6 @@ function arrowheadLayer({ id, size, tracks }, currentTime) {
     });
 }
 
-/**
- * A trips spec with each row repeated every `pulseSpacing` timestamp units.
- *
- * Copy k has timestamps shifted by -k * pulseSpacing, so with currentTime
- * sweeping 0..pulseSpacing the heads sit at currentTime + k * pulseSpacing:
- * evenly spaced pulses at one speed that hand over seamlessly at the wrap.
- */
-/**
- * A row's pulse gap: pulseSpacing, or for a row shorter than it the largest whole
- * fraction of pulseSpacing that fits, so a pulse head (and its arrow) is always on it.
- * Half the trail floors the gap so a tiny row is not flooded with copies.
- */
 function rowPulseSpacing(span, trail, pulseSpacing) {
     const fit = Math.max(span, trail / 2);
     return fit >= pulseSpacing ? pulseSpacing : pulseSpacing / Math.ceil(pulseSpacing / fit);
@@ -184,7 +158,6 @@ function expandPulses(spec) {
         const lo = Math.min(ts[0], ts[ts.length - 1]);
         const hi = Math.max(ts[0], ts[ts.length - 1]);
         const gap = rowPulseSpacing(hi - lo, trail, pulseSpacing);
-        // Copies must cover the whole clock cycle, which can be longer than a short row's gap.
         for (let k = Math.floor((lo - cycle) / gap); k <= Math.ceil((hi + trail) / gap); k++) {
             rows.push(k === 0 ? row : { ...row, [key]: ts.map(t => t - k * gap) });
         }
@@ -220,8 +193,6 @@ function expandPulses(spec) {
  *   whatever Python put in the data list (snake_case). No camelCase conversion happens.
  */
 function buildLayer(spec, currentTime) {
-    // `loopLength`, `pulseSpacing`, `speedZoom` and `arrowheads` are read by the parent
-    // component (rAF loop, pulse copies, arrowhead layer); strip them so deck.gl never sees them.
     const { _type, _accessors = {}, loopLength, pulseSpacing, speedZoom, speedZoomStrength, arrowheads, ...rest } = spec;
     const LayerClass = LAYER_MAP[_type];
     if (!LayerClass) {
@@ -285,8 +256,7 @@ function EpecDeckMap({
     );
 
     // A single shared cycle length for all pulses: the max loopLength across
-    // trips specs (pulseSpacing where loopLength is unset, else the default).
-    // currentTime sweeps 0..loopLength.
+    // trips specs (falling back to the default). currentTime sweeps 0..loopLength.
     const loopLength = useMemo(() => {
         let maxLen = 0;
         for (const s of tripsSpecs) {
@@ -299,8 +269,6 @@ function EpecDeckMap({
     // Advanced by the rAF loop below; only meaningful when trips layers exist.
     const [currentTime, setCurrentTime] = useState(0);
 
-    // Live zoom for the clock rate (a ref, so no re-render), and zoom in half-level
-    // steps for arrowhead spacing, which is recomputed only when the step changes.
     const zoomRef = useRef((viewState && viewState.zoom) || 4);
     const [zoomKey, setZoomKey] = useState(() => Math.round(zoomRef.current * 2) / 2);
     const onViewStateChange = useCallback(({ viewState: vs }) => {
@@ -308,7 +276,6 @@ function EpecDeckMap({
         setZoomKey(Math.round(vs.zoom * 2) / 2);
     }, []);
 
-    // The first trips spec's speedZoom / speedZoomStrength, if any, set the shared clock rate.
     const [speedZoom, speedZoomStrength] = useMemo(() => {
         const s = tripsSpecs.find(t => t.speedZoom != null);
         if (!s) return [null, 1];
@@ -332,7 +299,6 @@ function EpecDeckMap({
         let lastFrameTs = 0;
         let time = 0;
 
-        // Integrated rather than derived from elapsed time, so a rate change on zoom never jumps.
         const tick = (ts) => {
             rafId = requestAnimationFrame(tick);
             if (ts - lastFrameTs < FRAME_INTERVAL_MS) return;  // throttle
@@ -376,7 +342,6 @@ function EpecDeckMap({
 
     // Trips layers rebuilt each frame with the current time; drawn on top of the
     // static layers. deck.gl diffs efficiently, so only these update per frame.
-    // Pulse copies are built once per layers update; each frame reuses the same data arrays.
     const pulseSpecs = useMemo(() => tripsSpecs.map(expandPulses), [tripsSpecs]);
 
     const tripsLayers = useMemo(

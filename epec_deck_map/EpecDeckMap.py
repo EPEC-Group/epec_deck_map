@@ -19,24 +19,8 @@ class EpecDeckMap(Component):
         Layer spec dicts.  Each dict must have ``_type`` (the deck.gl class
         name), ``_accessors`` (mapping camelCase prop → snake_case data key),
         and any additional static props understood by that layer class.
-        A TripsLayer spec may add ``arrowheads: {"size": px, "spacing": px,
-        "color": [r, g, b, a]}`` (all optional; defaults 8, 150, the pulse
-        colour): arrowheads ride each pulse head pointing in the direction of
-        travel (increasing timestamp) and repeat about ``spacing`` screen
-        pixels apart on long lines. Lines shorter on screen than two arrows,
-        or than ``minLength`` px if set, get none. Not pickable.
-        A TripsLayer spec may also set ``pulseSpacing`` (timestamp units, e.g.
-        km): each row then carries a pulse every ``pulseSpacing`` along it, all
-        at one speed (a row shorter than ``pulseSpacing`` gets the largest
-        whole fraction of it no longer than the row, floored at half
-        ``trailLength``, so it always carries a pulse head), and ``loopLength`` defaults to ``pulseSpacing`` (keep them
-        equal so pulses hand over seamlessly at the cycle wrap).
-        ``speedZoom`` (number) slows the clock when zoomed in past that zoom:
-        it runs at 2 ** (-speedZoomStrength * max(0, zoom - speedZoom)) times
-        its normal rate, so at or below ``speedZoom`` a cycle takes 4 s.
-        ``speedZoomStrength`` defaults to 1, which keeps on-screen speed
-        constant beyond ``speedZoom``; smaller values only damp the speed-up.
-        The first trips spec that sets ``speedZoom`` drives the shared clock.
+        A TripsLayer spec may also set ``arrowheads``, ``pulseSpacing``,
+        ``speedZoom`` and ``speedZoomStrength`` (see README).
     viewState : dict
         Initial camera ``{latitude, longitude, zoom, pitch}``.  Used once on
         mount; user pan/zoom is managed internally by deck.gl.
