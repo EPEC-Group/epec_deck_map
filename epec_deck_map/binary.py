@@ -36,14 +36,7 @@ def _flatten(name, values):
 
 
 def binary_data(columns, dtypes=None, per_vertex=()):
-    """Pack ``{accessor: per-object values}`` into binary layer ``data``.
-
-    Each value is a number or a fixed-length list (a position, a colour).
-    ``getPath`` and any column named in ``per_vertex`` hold one such value per
-    vertex for each object, so every object's list must match its path.
-    Columns named ``*Color`` default to normalised ``uint8``, all others to
-    ``float32`` (about 1.5 m on longitude); override per column with ``dtypes``.
-    """
+    """Pack ``{accessor: per-object values}`` into binary layer ``data``; ``*Color`` defaults to uint8, others float32."""
     dtypes = dict(dtypes or {})
     vertex_columns = set(per_vertex) | ({'getPath'} & set(columns))
     if vertex_columns and 'getPath' not in columns:

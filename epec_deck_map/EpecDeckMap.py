@@ -19,12 +19,8 @@ class EpecDeckMap(Component):
         Layer spec dicts.  Each dict must have ``_type`` (the deck.gl class
         name), ``_accessors`` (mapping camelCase prop → snake_case data key),
         and any additional static props understood by that layer class.
-        ``data`` is a list of row dicts, or binary data from
-        ``epec_deck_map.binary_data`` (packed typed arrays, no ``_accessors``
-        needed for its columns).  A binary layer may carry ``_objects``, a
-        list of row dicts indexed like its objects, for tooltips and
-        ``clickInfo``.  Invalid binary data skips the layer with a console
-        error.
+        ``data`` may come from ``binary_data``, with ``_objects`` rows for
+        tooltips and ``clickInfo``.
     viewState : dict
         Initial camera ``{latitude, longitude, zoom, pitch}``.  Used once on
         mount; user pan/zoom is managed internally by deck.gl.
@@ -40,8 +36,7 @@ class EpecDeckMap(Component):
     clickInfo : dict
         Output-only.  Set when user clicks a pickable feature:
         ``{"object": <data row>, "index": int, "coordinate": [lon, lat],
-        "layerId": str}``.  On a binary layer ``object`` is
-        ``_objects[index]``, or ``None`` without ``_objects``.
+        "layerId": str}``.
     """
 
     _prop_names = [

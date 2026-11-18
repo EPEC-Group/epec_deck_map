@@ -40,7 +40,6 @@ const DTYPES = {
     float64: Float64Array,
 };
 
-/** Decode a {dtype, base64} column from epec_deck_map.binary (little-endian). */
 function decodeArray(enc, name) {
     const ArrayType = enc && DTYPES[enc.dtype];
     if (!ArrayType || typeof enc.base64 !== 'string') {
@@ -55,7 +54,6 @@ function decodeArray(enc, name) {
     return new ArrayType(bytes.buffer);
 }
 
-/** Repeat each object's value across its vertices (deck.gl reads path attributes per vertex). */
 function perVertex(value, size, starts, vertexCount) {
     const out = new value.constructor(vertexCount * size);
     for (let i = 0; i < starts.length; i++) {
@@ -67,13 +65,6 @@ function perVertex(value, size, starts, vertexCount) {
     return out;
 }
 
-/**
- * Decode binary layer data into deck.gl's {length, startIndices, attributes} form.
- *
- * Without startIndices every attribute holds one value per object. With
- * startIndices, getPath holds the vertices and every other attribute holds
- * one value per vertex or per object; per-object values are expanded here.
- */
 function decodeBinaryData(data) {
     const { length } = data;
     if (!Number.isInteger(length) || length < 0) {
@@ -132,10 +123,8 @@ function decodeBinaryData(data) {
     return { length, startIndices, attributes };
 }
 
-// Keyed by the spec's data object so TripsLayer rebuilds each frame reuse one decode.
 const decodedCache = new WeakMap();
 
-/** Decoded binary data, or null (logged once) if it fails validation. */
 function binaryData(data, layerId) {
     if (!decodedCache.has(data)) {
         let decoded = null;
@@ -149,7 +138,6 @@ function binaryData(data, layerId) {
     return decodedCache.get(data);
 }
 
-/** The picked row: the JSON data row, or a binary layer's `_objects` entry. */
 function pickedObject({ object, index, layer }) {
     if (object) return object;
     const objects = layer && layer.props._objects;
@@ -163,10 +151,8 @@ function pickedObject({ object, index, layer }) {
  *   {
  *     _type:     "PathLayer" | "ScatterplotLayer" | "TextLayer",
  *     id:        string,
- *     data:      [...],          // list of data-row dicts, or binary data from
- *                                // epec_deck_map.binary_data (see decodeBinaryData)
- *     _objects:  [...],          // binary only: optional rows for tooltip / clickInfo,
- *                                // indexed like the binary objects
+ *     data:      [...],          // rows, or epec_deck_map.binary_data
+ *     _objects:  [...],          // binary only: rows for tooltip / clickInfo
  *     _accessors: {              // camelCase prop name → snake_case data key
  *       "getPath": "path",
  *       "getFillColor": "fill_color",
@@ -341,8 +327,8 @@ function EpecDeckMap({
             setProps &&
                 setProps({
                     clickInfo: {
-                        object,                         // data-row dict from Python, or null
-                        index: info.index,              // row index within the layer's data
+                        object,
+                        index: info.index,
                         coordinate: info.coordinate,    // [lon, lat]
                         layerId: info.layer ? info.layer.id : null,
                     },
@@ -410,7 +396,7 @@ EpecDeckMap.propTypes = {
     /**
      * Output-only prop. Set by the component when the user clicks a pickable
      * feature: { object: <data row dict or null>, index: number, coordinate: [lon, lat],
-     * layerId: string }. For a binary layer, object is its `_objects[index]`.
+     * layerId: string }
      */
     clickInfo: PropTypes.object,
     /** Injected by Dash to propagate prop updates back to Python */
