@@ -71,15 +71,13 @@ See the docstring in [epec_deck_map/EpecDeckMap.py](epec_deck_map/EpecDeckMap.py
 
 ### Spec validation
 
-`EpecDeckMap(layers=...)` validates every spec and raises `ValueError` on an unknown `_type`, an unknown static prop, an unknown accessor in `_accessors` or a non-string accessor value, naming the layer and the closest valid name (`layer 'lines' (PathLayer): unknown prop 'widthUnit'; did you mean 'widthUnits'?`). Only spec keys are checked, never data rows. A callback that returns `layers` bypasses `__init__`, so wrap its return value:
+`EpecDeckMap(layers=...)` raises `ValueError` on an unknown `_type`, prop or accessor, with a did-you-mean hint. Wrap `layers` returned from a callback:
 
 ```python
 from epec_deck_map import validate_layers
 
 return validate_layers(layers)
 ```
-
-Valid names come from `epec_deck_map/layer_props.json`, generated from the installed deck.gl layer and extension classes by `npm run gen:props` (also run by `npm run build`); props of any `@deck.gl/extensions` extension are accepted on every layer. When adding a layer type, add it to `LAYERS` in `scripts/gen-layer-props.mjs` as well as `LAYER_MAP`; when the component starts reading a new spec key of its own, add it to `SPEC_KEYS` in `epec_deck_map/validation.py`. `python -m pytest tests` checks the layer types against `LAYER_MAP` and `SPEC_KEYS` against the keys `buildLayer` strips.
 
 ## Rebuilding the bundle
 
@@ -90,4 +88,4 @@ npm install
 npm run build
 ```
 
-This regenerates `epec_deck_map/layer_props.json` and writes `epec_deck_map/epec_deck_map.min.js`. The compiled bundle is committed to the repository because `pip install` from a git URL does not run `npm build` — without the pre-built file in the repo, the component would have no JavaScript.
+This writes `epec_deck_map/epec_deck_map.min.js`. The compiled bundle is committed to the repository because `pip install` from a git URL does not run `npm build` — without the pre-built file in the repo, the component would have no JavaScript.

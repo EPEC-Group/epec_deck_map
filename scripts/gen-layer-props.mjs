@@ -1,11 +1,9 @@
-// Dumps deck.gl prop names per supported layer and extension for Python spec validation.
 import {writeFileSync} from 'node:fs';
 import {VERSION} from '@deck.gl/core';
 import {PathLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
 import {TripsLayer} from '@deck.gl/geo-layers';
 import * as extensions from '@deck.gl/extensions';
 
-// Keep in step with LAYER_MAP in EpecDeckMap.react.js.
 const LAYERS = {PathLayer, ScatterplotLayer, TextLayer, TripsLayer};
 
 const sorted = names => [...new Set(names)].sort();

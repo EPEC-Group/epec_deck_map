@@ -6,10 +6,8 @@ from pathlib import Path
 
 _PROPS = json.loads(Path(__file__).with_name("layer_props.json").read_text(encoding="utf-8"))
 
-# Spec keys the component reads itself and strips before building the deck.gl layer.
 SPEC_KEYS = frozenset({"_type", "_accessors", "loopLength"})
 
-# Extension props are accepted on every layer, so a spec never has to name its extensions here.
 _EXT_PROPS = frozenset(p for e in _PROPS["extensions"].values() for p in e["props"])
 _EXT_ACCESSORS = frozenset(a for e in _PROPS["extensions"].values() for a in e["accessors"])
 
