@@ -42,6 +42,12 @@ class EpecDeckMap(Component):
     clickInfo : dict
         Output-only.  Set when user clicks a pickable feature:
         ``{"object": <data row>, "coordinate": [lon, lat], "layerId": str}``.
+    timeFilter : dict
+        ``{"domain": [t0, t1], "step", "window", "current", "playing",
+        "speed", "loop"}``.  Shows rows with ``current - window < t <=
+        current`` on layers with a ``getFilterValue`` accessor.
+    filterTime : float
+        Output-only.  Playback position while playing.
     """
 
     _prop_names = [
@@ -55,6 +61,8 @@ class EpecDeckMap(Component):
         'pickingRadius',
         'tooltip',
         'clickInfo',
+        'timeFilter',
+        'filterTime',
     ]
     _type = 'EpecDeckMap'
     _namespace = 'epec_deck_map'
@@ -84,6 +92,8 @@ class EpecDeckMap(Component):
         pickingRadius=Component.UNDEFINED,
         tooltip=Component.UNDEFINED,
         clickInfo=Component.UNDEFINED,
+        timeFilter=Component.UNDEFINED,
+        filterTime=Component.UNDEFINED,
         **kwargs
     ):
         self._prop_names = EpecDeckMap._prop_names

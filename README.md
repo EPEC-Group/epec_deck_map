@@ -83,6 +83,34 @@ See the docstring in [epec_deck_map/EpecDeckMap.py](epec_deck_map/EpecDeckMap.py
 | `pickingRadius` | int | Hit-test radius in pixels (default 5). |
 | `tooltip` | dict | `{"style": {...}}` applied to the tooltip container. Each data row supplies its own HTML in its `tooltip` field. |
 | `clickInfo` | dict | Output-only. Set on click: `{"object": <row>, "coordinate": [lon, lat], "layerId": str}`. |
+| `timeFilter` | dict | `{"domain": [t0, t1], "step", "window", "current", "playing", "speed", "loop"}`. Shows rows with `current - window < t <= current` on layers with a `getFilterValue` accessor. |
+| `filterTime` | float | Output-only. Playback position while playing. |
+
+### Time filter and playback
+
+```python
+layer = {"_type": "ScatterplotLayer", "data": rows,
+         "_accessors": {"getPosition": "pos", "getFillColor": "color", "getFilterValue": "t"}}
+EpecDeckMap(id="map", layers=[layer],
+            timeFilter={"domain": [t0, t1], "step": 300, "current": t0, "speed": 1200})
+
+@app.callback(Output("slider", "value"), Input("map", "filterTime"), prevent_initial_call=True)
+def follow(t):
+    return t
+
+@app.callback(Output("map", "timeFilter"), Input("slider", "value"), prevent_initial_call=True)
+def scrub(t):
+    p = Patch()
+    p["current"] = t
+    return p
+
+@app.callback(Output("map", "timeFilter", allow_duplicate=True), Input("play", "n_clicks"),
+              State("map", "timeFilter"), prevent_initial_call=True)
+def toggle(_, tf):
+    p = Patch()
+    p["playing"] = not tf.get("playing")
+    return p
+```
 
 ## Rebuilding the bundle
 

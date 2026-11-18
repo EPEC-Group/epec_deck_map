@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import DeckGL from '@deck.gl/react';
+import { DataFilterExtension } from '@deck.gl/extensions';
 import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { TripsLayer } from '@deck.gl/geo-layers';
 import { MapboxOverlay } from '@deck.gl/mapbox';
@@ -29,6 +30,10 @@ const FRAME_INTERVAL_MS = 1000 / 30;   // throttle the rAF loop to ~30fps
 const CYCLE_DURATION_MS = 4000;        // one full 0..loopLength cycle every 4s
 const DEFAULT_LOOP_LENGTH = 1.0;
 const DEFAULT_TRAIL_LENGTH = 0.3;
+
+const FILTER_EXTENSIONS = [new DataFilterExtension({ filterSize: 1 })];
+const REPORT_INTERVAL_MS = 250;
+const ECHO_MS = 5000;
 
 /**
  * Convert a layer spec dict (from Python) into a real deck.gl Layer instance.
@@ -74,7 +79,7 @@ function zoomGateKey(specs, zoom) {
     return key;
 }
 
-function buildLayer(spec, zoom, currentTime) {
+function buildLayer(spec, zoom, currentTime, filter) {
     const { _type, _accessors = {}, loopLength, minZoom, maxZoom, ...rest } = spec;
     const LayerClass = LAYER_MAP[_type];
     if (!LayerClass) {
@@ -104,7 +109,131 @@ function buildLayer(spec, zoom, currentTime) {
     }
     props.updateTriggers = updateTriggers;
 
+    // float32 attribute, so times are relative to the domain start.
+    if (_accessors.getFilterValue) {
+        const key = _accessors.getFilterValue;
+        const t0 = filter ? filter.t0 : 0;
+        props.getFilterValue = (d) => d[key] - t0;
+        props.extensions = FILTER_EXTENSIONS;
+        props.filterEnabled = Boolean(filter);
+        props.filterRange = filter ? filter.range : [0, 0];
+        props.updateTriggers = { ...props.updateTriggers, getFilterValue: t0 };
+    }
+
     return new LayerClass(props);
+}
+
+// Inclusive float32 bounds; the nudge makes the window (lo, hi].
+const nudge = (v) => v + (Math.abs(v) + 1) * 2 ** -20;
+
+function useTimeFilter(timeFilter, setProps) {
+    const tf = timeFilter || null;
+    const [t0, t1] = tf && Array.isArray(tf.domain) ? tf.domain.map(Number) : [0, 0];
+    const step = tf && tf.step > 0 ? Number(tf.step) : null;
+    const win = tf && tf.window != null ? Number(tf.window) : (step || t1 - t0);
+    const speed = tf && tf.speed > 0 ? Number(tf.speed) : (step || (t1 - t0) / 10);
+    const playing = Boolean(tf && tf.playing);
+    const loop = Boolean(tf && tf.loop);
+    const cur = tf && tf.current != null ? Number(tf.current) : null;
+
+    const snap = useCallback(
+        (p) => (step ? t0 + Math.floor((p - t0) / step + 1e-6) * step : p),
+        [t0, step],
+    );
+
+    const posRef = useRef(null);
+    const sentRef = useRef([]);
+    const lastSentAt = useRef(-Infinity);
+    const timerRef = useRef(null);
+    const pendingRef = useRef(null);
+    const tfRef = useRef(tf);
+    tfRef.current = tf;
+    const setPropsRef = useRef(setProps);
+    setPropsRef.current = setProps;
+    const [shown, setShown] = useState(null);
+
+    const report = useCallback((t) => {
+        pendingRef.current = t;
+        if (timerRef.current != null) return;
+        const wait = REPORT_INTERVAL_MS - (performance.now() - lastSentAt.current);
+        timerRef.current = setTimeout(() => {
+            timerRef.current = null;
+            lastSentAt.current = performance.now();
+            sentRef.current.push({ t: pendingRef.current, at: lastSentAt.current });
+            setPropsRef.current && setPropsRef.current({ filterTime: pendingRef.current });
+        }, Math.max(wait, 0));
+    }, []);
+    useEffect(() => () => clearTimeout(timerRef.current), []);
+
+    const domainRef = useRef(null);
+    useEffect(() => {
+        if (!tf) return;
+        if (domainRef.current !== `${t0},${t1}`) sentRef.current = [];
+        domainRef.current = `${t0},${t1}`;
+        const now = performance.now();
+        sentRef.current = sentRef.current.filter(r => now - r.at < ECHO_MS);
+        const echo = sentRef.current.some(r => r.t === cur);
+        let p = posRef.current;
+        if (p == null || (cur != null && !echo)) {
+            p = cur != null ? cur : t0;
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+        }
+        p = Math.min(Math.max(p, t0), t1);
+        posRef.current = p;
+        setShown(snap(p));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tf != null, cur, t0, t1, snap]);
+
+    useEffect(() => {
+        if (!playing) return undefined;
+        const end = t1 + (step || 0);
+        if (posRef.current == null || posRef.current >= (loop ? end : t1)) posRef.current = t0;
+        let prev = snap(posRef.current);
+        setShown(prev);
+        report(prev);
+
+        let rafId = null;
+        let lastTs = null;
+        const stop = () => {
+            if (rafId != null) cancelAnimationFrame(rafId);
+            rafId = null;
+        };
+        const tick = (ts) => {
+            rafId = requestAnimationFrame(tick);
+            if (lastTs == null) { lastTs = ts; return; }
+            if (ts - lastTs < FRAME_INTERVAL_MS) return;
+            let p = posRef.current + ((ts - lastTs) / 1000) * speed;
+            lastTs = ts;
+            if (p >= end && loop) p = t0;
+            const finished = !loop && p >= t1;
+            if (finished) p = t1;
+            posRef.current = p;
+            const s = snap(p);
+            if (s !== prev) { prev = s; setShown(s); report(s); }
+            if (finished) {
+                stop();
+                setPropsRef.current && setPropsRef.current({ timeFilter: { ...tfRef.current, playing: false } });
+            }
+        };
+        const start = () => {
+            if (rafId == null) { lastTs = null; rafId = requestAnimationFrame(tick); }
+        };
+        const onVisibility = () => (document.hidden ? stop() : start());
+        document.addEventListener('visibilitychange', onVisibility);
+        if (!document.hidden) start();
+        return () => {
+            document.removeEventListener('visibilitychange', onVisibility);
+            stop();
+        };
+    }, [playing, loop, t0, t1, step, speed, snap, report]);
+
+    return useMemo(() => {
+        if (!tf || shown == null) return null;
+        const hi = shown - t0;
+        return { t0, range: [nudge(hi - win), nudge(hi)] };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tf != null, shown, t0, win]);
 }
 
 const isPlainObject = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
@@ -174,6 +303,7 @@ function EpecDeckMap({
     interleaved,
     pickingRadius,
     tooltip,
+    timeFilter,
     setProps,
 }) {
     const initialViewState = viewState || {
@@ -204,6 +334,8 @@ function EpecDeckMap({
         }
     }, []);
 
+    const filter = useTimeFilter(timeFilter, setProps);
+
     // Split specs into animated (TripsLayer) and everything else. Non-trips
     // layers are memoised and never rebuilt per frame; only the trips layers
     // are rebuilt each frame with an updated currentTime.
@@ -220,11 +352,10 @@ function EpecDeckMap({
         return { tripsSpecs: trips, otherSpecs: others };
     }, [layers]);
 
-    // Static layers — rebuilt only when their specs change (NOT each frame).
     const otherLayers = useMemo(
-        () => otherSpecs.map(s => buildLayer(s, zoomRef.current)).filter(Boolean),
+        () => otherSpecs.map(s => buildLayer(s, zoomRef.current, undefined, filter)).filter(Boolean),
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [otherSpecs, gateKey],
+        [otherSpecs, gateKey, filter],
     );
 
     // A single shared cycle length for all pulses: the max loopLength across
@@ -292,9 +423,9 @@ function EpecDeckMap({
     // Trips layers rebuilt each frame with the current time; drawn on top of the
     // static layers. deck.gl diffs efficiently, so only these update per frame.
     const tripsLayers = useMemo(
-        () => tripsSpecs.map(s => buildLayer(s, zoomRef.current, currentTime)).filter(Boolean),
+        () => tripsSpecs.map(s => buildLayer(s, zoomRef.current, currentTime, filter)).filter(Boolean),
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [tripsSpecs, currentTime, gateKey],
+        [tripsSpecs, currentTime, gateKey, filter],
     );
 
     const deckLayers = useMemo(
@@ -415,6 +546,18 @@ EpecDeckMap.propTypes = {
      * feature: { object: <data row dict>, coordinate: [lon, lat], layerId: string }
      */
     clickInfo: PropTypes.object,
+    /** {domain: [t0, t1], step, window, current, playing, speed, loop} */
+    timeFilter: PropTypes.shape({
+        domain: PropTypes.arrayOf(PropTypes.number).isRequired,
+        step: PropTypes.number,
+        window: PropTypes.number,
+        current: PropTypes.number,
+        playing: PropTypes.bool,
+        speed: PropTypes.number,
+        loop: PropTypes.bool,
+    }),
+    /** Output-only. Playback position while playing. */
+    filterTime: PropTypes.number,
     /** Injected by Dash to propagate prop updates back to Python */
     setProps: PropTypes.func,
 };
