@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import DeckGL from '@deck.gl/react';
 import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
@@ -47,6 +47,8 @@ const DEFAULT_TRAIL_LENGTH = 0.3;
  *     pickable: true,
  *     getTextAnchor: "middle",   // constant string, NOT a data accessor
  *     characterSet: [...],       // no @@= corruption possible here
+ *     minZoom: 7,
+ *     maxZoom: 10,
  *     ...
  *   }
  *
@@ -56,10 +58,23 @@ const DEFAULT_TRAIL_LENGTH = 0.3;
  * Workaround #3 retired: clickInfo.object is the exact data-row dict; keys are always
  *   whatever Python put in the data list (snake_case). No camelCase conversion happens.
  */
-function buildLayer(spec, currentTime) {
-    // `loopLength` is an animation control read by the parent component (see the
-    // rAF loop below); strip it so it is never passed as an unknown deck.gl prop.
-    const { _type, _accessors = {}, loopLength, ...rest } = spec;
+function inZoomRange(spec, zoom) {
+    return (spec.minZoom == null || zoom >= spec.minZoom)
+        && (spec.maxZoom == null || zoom < spec.maxZoom);
+}
+
+function zoomGateKey(specs, zoom) {
+    let key = '';
+    for (const s of (specs || [])) {
+        if (s && (s.minZoom != null || s.maxZoom != null)) {
+            key += inZoomRange(s, zoom) ? '1' : '0';
+        }
+    }
+    return key;
+}
+
+function buildLayer(spec, zoom, currentTime) {
+    const { _type, _accessors = {}, loopLength, minZoom, maxZoom, ...rest } = spec;
     const LayerClass = LAYER_MAP[_type];
     if (!LayerClass) {
         console.warn(`EpecDeckMap: unknown layer type "${_type}" — skipping`);
@@ -68,6 +83,7 @@ function buildLayer(spec, currentTime) {
 
     // Start with all static props (data, id, widthScale, characterSet, …)
     const props = { ...rest };
+    props.visible = rest.visible !== false && inZoomRange(spec, zoom);
 
     // TripsLayer is the only animated layer: inject the per-frame currentTime and
     // fall back to a sane trailLength if Python did not supply one.
@@ -102,6 +118,34 @@ function EpecDeckMap({
     tooltip,
     setProps,
 }) {
+    const initialViewState = viewState || {
+        latitude: -25.5,
+        longitude: 134.5,
+        zoom: 4,
+        pitch: 0,
+    };
+
+    const zoomRef = useRef(initialViewState.zoom);
+    const viewKeyRef = useRef(null);
+    const viewKey = JSON.stringify(initialViewState);
+    if (viewKeyRef.current !== viewKey) {
+        viewKeyRef.current = viewKey;
+        zoomRef.current = initialViewState.zoom;
+    }
+    const gateKey = zoomGateKey(layers, zoomRef.current);
+    const layersRef = useRef(layers);
+    const gateKeyRef = useRef(gateKey);
+    layersRef.current = layers;
+    gateKeyRef.current = gateKey;
+    const [, forceRender] = useReducer(n => n + 1, 0);
+
+    const handleViewStateChange = useCallback(({ viewState: vs }) => {
+        zoomRef.current = vs.zoom;
+        if (zoomGateKey(layersRef.current, vs.zoom) !== gateKeyRef.current) {
+            forceRender();
+        }
+    }, []);
+
     // Split specs into animated (TripsLayer) and everything else. Non-trips
     // layers are memoised and never rebuilt per frame; only the trips layers
     // are rebuilt each frame with an updated currentTime.
@@ -120,8 +164,9 @@ function EpecDeckMap({
 
     // Static layers — rebuilt only when their specs change (NOT each frame).
     const otherLayers = useMemo(
-        () => otherSpecs.map(s => buildLayer(s)).filter(Boolean),
-        [otherSpecs],
+        () => otherSpecs.map(s => buildLayer(s, zoomRef.current)).filter(Boolean),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [otherSpecs, gateKey],
     );
 
     // A single shared cycle length for all pulses: the max loopLength across
@@ -189,8 +234,9 @@ function EpecDeckMap({
     // Trips layers rebuilt each frame with the current time; drawn on top of the
     // static layers. deck.gl diffs efficiently, so only these update per frame.
     const tripsLayers = useMemo(
-        () => tripsSpecs.map(s => buildLayer(s, currentTime)).filter(Boolean),
-        [tripsSpecs, currentTime],
+        () => tripsSpecs.map(s => buildLayer(s, zoomRef.current, currentTime)).filter(Boolean),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [tripsSpecs, currentTime, gateKey],
     );
 
     const deckLayers = useMemo(
@@ -228,13 +274,6 @@ function EpecDeckMap({
         [tooltip],
     );
 
-    const initialViewState = viewState || {
-        latitude: -25.5,
-        longitude: 134.5,
-        zoom: 4,
-        pitch: 0,
-    };
-
     return (
         <div
             id={id}
@@ -243,6 +282,7 @@ function EpecDeckMap({
             <DeckGL
                 initialViewState={initialViewState}
                 controller={true}
+                onViewStateChange={handleViewStateChange}
                 layers={deckLayers}
                 pickingRadius={pickingRadius != null ? pickingRadius : 5}
                 onClick={handleClick}
