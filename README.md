@@ -112,6 +112,26 @@ def toggle(_, tf):
     return p
 ```
 
+### Flow chevrons
+
+PathLayer: chevrons every `interval` px, pointing along the vertex order where `getDirection` is 1 and against it where -1; other rows get none.
+
+```python
+{"_accessors": {"getPath": "path", "getDirection": "dir"},
+ "chevrons": {"interval": 80, "size": 6, "color": [255, 255, 255, 255],
+              "clearance": 10, "maxTurn": 150, "merge": 10}}
+# chevrons turn through bends over clearance px either side, hide at bends past maxTurn degrees,
+# and hide where a longer line runs within merge px the same way
+```
+
+### Constant-speed pulses
+
+TripsLayer only. Timestamps in km along the line.
+
+```python
+{"pulseSpacing": 150, "speedZoom": 6, "speedZoomStrength": 0.5}
+```
+
 ## Rebuilding the bundle
 
 Node 18 or later is required.

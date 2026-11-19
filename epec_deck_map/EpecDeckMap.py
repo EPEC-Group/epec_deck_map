@@ -21,6 +21,8 @@ class EpecDeckMap(Component):
         and any additional static props understood by that layer class.
         Optional ``minZoom`` (inclusive) / ``maxZoom`` (exclusive) limit the
         layer to a zoom range.
+        A PathLayer spec may set ``chevrons``; a TripsLayer spec
+        ``pulseSpacing``, ``speedZoom`` and ``speedZoomStrength`` (see README).
     viewState : dict
         Initial camera ``{latitude, longitude, zoom, pitch}``.  Used once on
         mount; user pan/zoom is managed internally by deck.gl.
