@@ -1,0 +1,366 @@
+{
+ "deckgl": "9.3.1",
+ "layers": {
+  "PathLayer": {
+   "props": [
+    "_dataDiff",
+    "_pathType",
+    "autoHighlight",
+    "billboard",
+    "capRounded",
+    "colorFormat",
+    "coordinateOrigin",
+    "coordinateSystem",
+    "data",
+    "dataComparator",
+    "dataTransform",
+    "extensions",
+    "fetch",
+    "getColor",
+    "getPath",
+    "getPolygonOffset",
+    "getWidth",
+    "highlightColor",
+    "highlightedObjectIndex",
+    "id",
+    "jointRounded",
+    "loadOptions",
+    "loaders",
+    "miterLimit",
+    "modelMatrix",
+    "onClick",
+    "onDataLoad",
+    "onDrag",
+    "onDragEnd",
+    "onDragStart",
+    "onError",
+    "onHover",
+    "opacity",
+    "operation",
+    "parameters",
+    "pickable",
+    "positionFormat",
+    "rounded",
+    "transitions",
+    "updateTriggers",
+    "visible",
+    "widthMaxPixels",
+    "widthMinPixels",
+    "widthScale",
+    "widthUnits",
+    "wrapLongitude"
+   ],
+   "accessors": [
+    "getColor",
+    "getPath",
+    "getWidth",
+    "highlightColor"
+   ]
+  },
+  "ScatterplotLayer": {
+   "props": [
+    "_dataDiff",
+    "antialiasing",
+    "autoHighlight",
+    "billboard",
+    "colorFormat",
+    "coordinateOrigin",
+    "coordinateSystem",
+    "data",
+    "dataComparator",
+    "dataTransform",
+    "extensions",
+    "fetch",
+    "filled",
+    "getColor",
+    "getFillColor",
+    "getLineColor",
+    "getLineWidth",
+    "getPolygonOffset",
+    "getPosition",
+    "getRadius",
+    "highlightColor",
+    "highlightedObjectIndex",
+    "id",
+    "lineWidthMaxPixels",
+    "lineWidthMinPixels",
+    "lineWidthScale",
+    "lineWidthUnits",
+    "loadOptions",
+    "loaders",
+    "modelMatrix",
+    "onClick",
+    "onDataLoad",
+    "onDrag",
+    "onDragEnd",
+    "onDragStart",
+    "onError",
+    "onHover",
+    "opacity",
+    "operation",
+    "outline",
+    "parameters",
+    "pickable",
+    "positionFormat",
+    "radiusMaxPixels",
+    "radiusMinPixels",
+    "radiusScale",
+    "radiusUnits",
+    "strokeWidth",
+    "stroked",
+    "transitions",
+    "updateTriggers",
+    "visible",
+    "wrapLongitude"
+   ],
+   "accessors": [
+    "getFillColor",
+    "getLineColor",
+    "getLineWidth",
+    "getPosition",
+    "getRadius",
+    "highlightColor"
+   ]
+  },
+  "TextLayer": {
+   "props": [
+    "_dataDiff",
+    "autoHighlight",
+    "background",
+    "backgroundBorderRadius",
+    "backgroundColor",
+    "backgroundPadding",
+    "billboard",
+    "characterSet",
+    "colorFormat",
+    "contentAlignHorizontal",
+    "contentAlignVertical",
+    "contentCutoffPixels",
+    "coordinateOrigin",
+    "coordinateSystem",
+    "data",
+    "dataComparator",
+    "dataTransform",
+    "extensions",
+    "fetch",
+    "fontFamily",
+    "fontSettings",
+    "fontWeight",
+    "getAlignmentBaseline",
+    "getAngle",
+    "getBackgroundColor",
+    "getBorderColor",
+    "getBorderWidth",
+    "getColor",
+    "getContentBox",
+    "getPixelOffset",
+    "getPolygonOffset",
+    "getPosition",
+    "getSize",
+    "getText",
+    "getTextAnchor",
+    "highlightColor",
+    "highlightedObjectIndex",
+    "id",
+    "lineHeight",
+    "loadOptions",
+    "loaders",
+    "maxWidth",
+    "modelMatrix",
+    "onClick",
+    "onDataLoad",
+    "onDrag",
+    "onDragEnd",
+    "onDragStart",
+    "onError",
+    "onHover",
+    "opacity",
+    "operation",
+    "outlineColor",
+    "outlineWidth",
+    "parameters",
+    "pickable",
+    "positionFormat",
+    "sizeMaxPixels",
+    "sizeMinPixels",
+    "sizeScale",
+    "sizeUnits",
+    "transitions",
+    "updateTriggers",
+    "visible",
+    "wordBreak",
+    "wrapLongitude"
+   ],
+   "accessors": [
+    "getAlignmentBaseline",
+    "getAngle",
+    "getBackgroundColor",
+    "getBorderColor",
+    "getBorderWidth",
+    "getColor",
+    "getContentBox",
+    "getPixelOffset",
+    "getPosition",
+    "getSize",
+    "getText",
+    "getTextAnchor",
+    "highlightColor"
+   ]
+  },
+  "TripsLayer": {
+   "props": [
+    "_dataDiff",
+    "_pathType",
+    "autoHighlight",
+    "billboard",
+    "capRounded",
+    "colorFormat",
+    "coordinateOrigin",
+    "coordinateSystem",
+    "currentTime",
+    "data",
+    "dataComparator",
+    "dataTransform",
+    "extensions",
+    "fadeTrail",
+    "fetch",
+    "getColor",
+    "getPath",
+    "getPolygonOffset",
+    "getTimestamps",
+    "getWidth",
+    "highlightColor",
+    "highlightedObjectIndex",
+    "id",
+    "jointRounded",
+    "loadOptions",
+    "loaders",
+    "miterLimit",
+    "modelMatrix",
+    "onClick",
+    "onDataLoad",
+    "onDrag",
+    "onDragEnd",
+    "onDragStart",
+    "onError",
+    "onHover",
+    "opacity",
+    "operation",
+    "parameters",
+    "pickable",
+    "positionFormat",
+    "rounded",
+    "trailLength",
+    "transitions",
+    "updateTriggers",
+    "visible",
+    "widthMaxPixels",
+    "widthMinPixels",
+    "widthScale",
+    "widthUnits",
+    "wrapLongitude"
+   ],
+   "accessors": [
+    "getColor",
+    "getPath",
+    "getTimestamps",
+    "getWidth",
+    "highlightColor"
+   ]
+  }
+ },
+ "extensions": {
+  "BrushingExtension": {
+   "props": [
+    "brushingEnabled",
+    "brushingRadius",
+    "brushingTarget",
+    "getBrushingTarget"
+   ],
+   "accessors": [
+    "getBrushingTarget"
+   ]
+  },
+  "ClipExtension": {
+   "props": [
+    "clipBounds",
+    "clipByInstance"
+   ],
+   "accessors": []
+  },
+  "CollisionFilterExtension": {
+   "props": [
+    "collisionEnabled",
+    "collisionGroup",
+    "collisionTestProps",
+    "getCollisionPriority"
+   ],
+   "accessors": [
+    "getCollisionPriority"
+   ]
+  },
+  "DataFilterExtension": {
+   "props": [
+    "filterCategories",
+    "filterEnabled",
+    "filterRange",
+    "filterSoftRange",
+    "filterTransformColor",
+    "filterTransformSize",
+    "getFilterCategory",
+    "getFilterValue",
+    "onFilteredItemsChange"
+   ],
+   "accessors": [
+    "getFilterCategory",
+    "getFilterValue"
+   ]
+  },
+  "FillStyleExtension": {
+   "props": [
+    "fillPatternAtlas",
+    "fillPatternEnabled",
+    "fillPatternMapping",
+    "fillPatternMask",
+    "getFillPattern",
+    "getFillPatternOffset",
+    "getFillPatternScale"
+   ],
+   "accessors": [
+    "getFillPattern",
+    "getFillPatternOffset",
+    "getFillPatternScale"
+   ]
+  },
+  "Fp64Extension": {
+   "props": [],
+   "accessors": []
+  },
+  "MaskExtension": {
+   "props": [
+    "maskByInstance",
+    "maskId",
+    "maskInverted"
+   ],
+   "accessors": []
+  },
+  "PathStyleExtension": {
+   "props": [
+    "dashGapPickable",
+    "dashJustified",
+    "getDashArray",
+    "getOffset"
+   ],
+   "accessors": [
+    "getDashArray",
+    "getOffset"
+   ]
+  },
+  "_TerrainExtension": {
+   "props": [
+    "terrainDrawMode"
+   ],
+   "accessors": []
+  }
+ }
+}

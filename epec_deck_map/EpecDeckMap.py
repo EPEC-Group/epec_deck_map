@@ -4,6 +4,8 @@
 
 from dash.development.base_component import Component, _explicitize_args
 
+from .validation import validate_layers
+
 
 class EpecDeckMap(Component):
     """EpecDeckMap — custom deck.gl wrapper for MM Client Portal.
@@ -102,6 +104,9 @@ class EpecDeckMap(Component):
         self._valid_wildcard_attributes = []
         self.available_properties = EpecDeckMap._prop_names
         self.available_wildcard_properties = []
+
+        if layers is not Component.UNDEFINED and layers is not None:
+            validate_layers(layers)
 
         _explicit_args = kwargs.pop('_explicit_args')
         _locals = locals()

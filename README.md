@@ -112,6 +112,16 @@ def toggle(_, tf):
     return p
 ```
 
+### Spec validation
+
+`EpecDeckMap(layers=...)` raises `ValueError` on an unknown `_type`, prop or accessor, with a did-you-mean hint. Wrap `layers` returned from a callback:
+
+```python
+from epec_deck_map import validate_layers
+
+return validate_layers(layers)
+```
+
 ## Rebuilding the bundle
 
 Node 18 or later is required.
